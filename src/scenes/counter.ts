@@ -10,7 +10,7 @@
 
 import type { GameContext } from '../game/types';
 import type { Client, Rule, RuleType, Decision, MatchInfo, BetPick } from '../game/types';
-import { DENOMINATIONS } from '../game/types';
+import { DENOMINATIONS, COUNTRY_LABELS } from '../game/types';
 import type { Scene } from '../engine/stateMachine';
 import { Renderer } from '../engine/renderer';
 import { Button, Panel, DocumentCard, ListView, MoneyTray, inRect } from '../engine/ui';
@@ -32,19 +32,34 @@ import {
   drawBetSlip,
   drawMatchRow,
   drawScoreEntry,
+  drawPleaBubble,
+  drawPoliceFlash,
+  drawCop,
+  drawPhoneIcon,
+  drawRadio,
 } from '../engine/sprites';
+import * as radio from '../engine/radio';
 // Namespace import so the new expansion sprites (drawCBD / drawMagazine /
 // drawVape) can be looked up defensively at runtime: they are added by the
 // sprites phase and may not exist yet, so we never reference them statically.
 import * as Sprites from '../engine/sprites';
 
 import { evaluateDecision, ageFrom } from '../game/rules';
-import { applyConsequence, applyChangeError, applyBettingError } from '../game/consequence';
+import {
+  applyConsequence,
+  applyChangeError,
+  applyBettingError,
+  applyPoliceCall,
+  applyPoliceBonus,
+  applyPublicSceneDing,
+  applyCaveInDing,
+  applyCedeSale,
+} from '../game/consequence';
 import type { GameEvent } from '../game/consequence';
-import { cashIn, payout, oddsForPick } from '../game/economy';
+import { cashIn, payout, oddsForPick, policeBonusFor } from '../game/economy';
 import { isAvailable } from '../game/content/products';
 import { dayConfig, unlockedGroupsForDay } from '../game/content/days';
-import { recurringCharacterFor } from '../game/content/characters';
+import { recurringCharacterFor, GAMBLER } from '../game/content/characters';
 import {
   matchesForDay,
   matchById,
@@ -57,6 +72,7 @@ import { playSfx } from '../engine/sfx';
 import { TweenGroup, Ease } from '../engine/tween';
 import { wobble } from '../engine/anim';
 import { shake, flash, floatText } from '../engine/fx';
+import { mathHelpEnabled } from '../engine/options';
 import { DayEndScene } from './dayEnd';
 
 const PATIENCE_DRAIN_PER_SEC = 5; // base patience lost per second while waiting
@@ -90,7 +106,13 @@ function wrapText(text: string, maxChars: number): string[] {
   return lines.length ? lines : [''];
 }
 
-type SubStep = 'service' | 'change' | 'betting';
+type SubStep = 'service' | 'change' | 'betting' | 'insisting';
+
+/** How fast the "esclandre" (public-scene) meter fills while an insister waits. */
+const ESCLANDRE_RATE = 0.12; // 0..1 per second (≈8s to storm off)
+
+/** Seconds the police-arrival cinematic plays before the call resolves. */
+const POLICE_ARRIVAL_TIME = 1.4;
 
 /** Seconds a fraudster waits after their bet is registered before fleeing unpaid. */
 const BET_LEAVE_TIME = 7;
@@ -210,6 +232,20 @@ export class CounterScene implements Scene {
   private scoreA = 0;
   private scoreB = 0;
 
+  // Insisting-standoff state (the REFUSE -> esclandre / police branch).
+  private esclandre = 0; // 0..1 "public scene" meter; full = client storms off
+  private policeActive = false; // a police-arrival cinematic is playing (locks input)
+  private copVisible = false; // cop sprite shown at the window during the arrival
+  private policeJustified = false; // captured at call time (client.policeWorthy)
+  // True when the standoff was opened AFTER a concluded sale (insistsAfterSale):
+  // the client already paid, so 'Céder' must NOT re-charge — he simply leaves.
+  private servedInsister = false;
+  // True when the standoff was opened by an UNJUSTIFIED refusal (turning away a
+  // legal request). The wrong-refuse fault is deferred until the standoff ends with
+  // the customer leaving unserved (police / storm-off); 'Céder' clears it (the
+  // refusal was reversed). Prevents a snitch-bonus / esclandre from laundering it.
+  private insistWrongRefuse = false;
+
   // Widgets.
   private readonly tray: MoneyTray;
   private banList: ListView;
@@ -223,6 +259,11 @@ export class CounterScene implements Scene {
   private readonly btnConfirm: Button;
   private readonly btnReset: Button;
   private readonly btnCancel: Button;
+
+  // Insisting-standoff controls (the 3rd verb lives here).
+  private readonly btnIgnore: Button;
+  private readonly btnCede: Button;
+  private readonly btnPolice: Button;
 
   // Betting widgets.
   private readonly btnOpenTerminal: Button;
@@ -311,6 +352,17 @@ export class CounterScene implements Scene {
       { color: PAL.mutedGreen },
     );
 
+    // Insisting-standoff controls (shown only while step === 'insisting').
+    this.btnIgnore = new Button({ x: 238, y: 248, w: 66, h: 18 }, 'Ignorer', () => this.holdFirm(), {
+      color: PAL.wood,
+    });
+    this.btnCede = new Button({ x: 308, y: 248, w: 52, h: 18 }, 'Céder', () => this.cede(), {
+      color: PAL.fdjYellow,
+    });
+    this.btnPolice = new Button({ x: 382, y: 248, w: 92, h: 18 }, 'POLICE', () => this.callPolice(), {
+      color: PAL.franceBlue,
+    });
+
     // Betting controls. The terminal button replaces VENDRE/REFUSER for a bet client.
     this.btnOpenTerminal = new Button(
       { x: 326, y: 248, w: 148, h: 18 },
@@ -371,6 +423,13 @@ export class CounterScene implements Scene {
     this.clientNod = 0;
     this.buildBanList();
     this.setupClient();
+    // The radio only sounds at the counter: resume it if the set was left on.
+    radio.resumeRadio();
+  }
+
+  /** Leaving the counter silences the radio (kept "on" so it resumes on return). */
+  exit(): void {
+    radio.suspendPlayback();
   }
 
   // --- per-client setup ------------------------------------------------------
@@ -390,6 +449,13 @@ export class CounterScene implements Scene {
     this.betLeaveTimer = 0;
     this.scoreA = 0;
     this.scoreB = 0;
+    // Reset insisting-standoff state.
+    this.esclandre = 0;
+    this.policeActive = false;
+    this.copVisible = false;
+    this.policeJustified = false;
+    this.servedInsister = false;
+    this.insistWrongRefuse = false;
     // Reset per-client cosmetic state.
     this.docSlam = 0;
     this.clientNod = 0;
@@ -404,6 +470,7 @@ export class CounterScene implements Scene {
       [
         { label: 'Nom', value: c.fullName },
         { label: 'Date de naissance', value: formatDate(c.birthDate) },
+        { label: 'Nationalité', value: COUNTRY_LABELS[c.country ?? 'FR'] },
       ],
       { title: 'CARTE NATIONALE D’IDENTITÉ' },
     );
@@ -612,6 +679,16 @@ export class CounterScene implements Scene {
   private onRefuse(): void {
     const c = this.client;
     if (!c) return;
+    // An insisting client does NOT simply leave when refused: they dig in and a
+    // public "esclandre" begins. Hand off to the standoff sub-step instead.
+    if (c.insists) {
+      // Remember whether THIS refusal was actually wrong (a legal request turned
+      // away): the fault is deferred to whichever resolution leaves him unserved,
+      // so a snitch-bonus or esclandre cannot wash it away.
+      this.insistWrongRefuse = !evaluateDecision(c, 'refuse', this.rules).correct;
+      this.enterInsisting(c);
+      return;
+    }
     const evalR = evaluateDecision(c, 'refuse', this.rules);
     const decision: Decision = { client: c, action: 'refuse', correct: evalR.correct };
     const events = applyConsequence(this.ctx.state, decision);
@@ -624,6 +701,164 @@ export class CounterScene implements Scene {
     }
     this.showEvents(events);
     this.advance();
+  }
+
+  // --- insisting standoff (the 3rd verb: report to police) -------------------
+
+  /** Refusing an insister opens the standoff: a plea + a rising esclandre meter. */
+  private enterInsisting(c: Client): void {
+    this.step = 'insisting';
+    this.showDoc = false;
+    this.showBanList = false;
+    this.esclandre = 0;
+    this.policeActive = false;
+    this.copVisible = false;
+    playSfx('refuse');
+    this.pushToast('Le client refuse de partir et fait un esclandre !', '#ffd54f');
+  }
+
+  /** IGNORER: tenir bon. Passive — the meter keeps filling on its own. */
+  private holdFirm(): void {
+    if (this.policeActive) return;
+    playSfx('click');
+    this.pushToast('Vous tenez bon. Le client s’agite…', '#ffd54f');
+  }
+
+  /**
+   * Record a deferred wrong-refuse fault if the standoff began on an unjustified
+   * refusal AND ends with the customer leaving unserved. Applied at most once
+   * (the flag is cleared), so a +500 € snitch bonus or an esclandre cannot launder
+   * the original mistake away.
+   */
+  private settleInsistRefusal(c: Client): void {
+    if (!this.insistWrongRefuse) return;
+    this.insistWrongRefuse = false;
+    const decision: Decision = { client: c, action: 'refuse', correct: false };
+    this.showEvents(applyConsequence(this.ctx.state, decision));
+  }
+
+  /** The esclandre meter filled: the client storms off by themselves (no fault). */
+  private stormOff(): void {
+    const c = this.client;
+    if (!c) return;
+    // The customer leaves unserved: if the refusal that opened the standoff was
+    // wrong (a legal request), the fault lands now (deferred from onRefuse).
+    this.settleInsistRefusal(c);
+    // Holding firm against a recurring character still counts as turning them away
+    // (e.g. refusing the banned gambler -> protectedGambler, the GOOD outcome).
+    this.tagStory(c, 'refuse');
+    // A public scene played out: a small reputation ding — UNLESS holding firm here
+    // is the intended/correct beat (a recurring character whose refusal raises a
+    // story flag, like protecting the addict). The player should not be dinged for
+    // correctly standing their ground; only an avoidable esclandre stings.
+    const rc = recurringCharacterFor(c);
+    const correctBeat = !!(rc && rc.storyOnRefuse);
+    if (!correctBeat) {
+      this.showEvents(applyPublicSceneDing(this.ctx.state));
+    }
+    this.pushToast('Le client pique une crise et claque la porte.', '#ffd54f');
+    playSfx('refuse');
+    this.advance('angry');
+  }
+
+  /** CÉDER: hand over the sale to make them leave. */
+  private cede(): void {
+    const c = this.client;
+    if (!c || this.policeActive) return;
+    this.step = 'service';
+    // Serving the client reverses the refusal that opened the standoff, so any
+    // deferred wrong-refuse fault is moot.
+    this.insistWrongRefuse = false;
+    // Post-sale standoff (insistsAfterSale): the client already paid, so giving in
+    // just makes him finally leave — never a second charge or cave-in ding.
+    if (this.servedInsister) {
+      this.pushToast('Vous le raccompagnez fermement vers la sortie.', '#ffd54f');
+      this.advance('neutral');
+      return;
+    }
+    // The standoff is also reachable for LEGAL sales (Mémé Ginette, or an ordinary
+    // customer wrongly turned away who insists on a sale that was actually allowed).
+    // Only an ILLEGAL sale is a "cave-in": serving a legitimate customer you'd
+    // wrongly refused is simply the correct decision — no ding, no fault.
+    const evalR = evaluateDecision(c, 'sell', this.rules);
+    if (!evalR.correct) {
+      // Folding to an illegal demand under the eyes of the esclandre crowd: a
+      // reputational hit PLUS a confirmed, immediately-visible fault (not a hidden
+      // risky sale that a later inspection might never audit).
+      this.showEvents(applyCaveInDing(this.ctx.state));
+      cashIn(this.ctx.state, c.request.price);
+      playSfx('sale');
+      this.floatMoney(`+${c.request.price.toFixed(2)} €`, PAL.mutedGreen);
+      this.showEvents(applyCedeSale(this.ctx.state, c));
+      this.pushToast('Vous cédez sous la pression. Le client repart satisfait.', '#ffd54f');
+      this.tagStory(c, 'sell');
+      this.advance('neutral');
+      return;
+    }
+    // The insister was a legitimate customer you'd wrongly refused: serving them now
+    // is the right call. Route through finalizeSale (no cave-in ding, no fault).
+    this.pushToast('Vous le servez finalement. Tout est en règle.', '#9ccc65');
+    this.finalizeSale(c, true);
+  }
+
+  /** APPELER LA POLICE: play a short arrival cinematic, then resolve the call. */
+  private callPolice(): void {
+    const c = this.client;
+    if (!c || this.policeActive) return;
+    this.policeActive = true;
+    this.copVisible = false;
+    this.policeJustified = c.policeWorthy === true;
+    playSfx('fine');
+    flash(PAL.franceBlue, 0.3);
+    shake(4, 0.42);
+    // Timer tween: the cop fades in mid-way, the call resolves on completion.
+    this.tweens.tween({
+      from: 0,
+      to: 1,
+      duration: POLICE_ARRIVAL_TIME,
+      easing: Ease.linear,
+      onUpdate: (v) => {
+        if (v > 0.35) this.copVisible = true;
+      },
+      onComplete: () => this.resolvePolice(),
+    });
+  }
+
+  /** End of the arrival cinematic: apply the police outcome + story flags. */
+  private resolvePolice(): void {
+    const c = this.client;
+    if (!c) return;
+    // The customer leaves unserved either way, so a wrong refusal that opened the
+    // standoff is faulted now — BEFORE any snitch bonus, which must not launder it.
+    this.settleInsistRefusal(c);
+    // Satirical "snitch reward": some caricature clients pay a flat CASH bonus when
+    // reported, bypassing the normal reputation / justified-vs-abuse outcome. Guard
+    // on the documented `> 0` contract (a 0 bonus falls through to the normal path).
+    const bonus = policeBonusFor(c);
+    if (bonus > 0) {
+      this.showEvents(applyPoliceBonus(this.ctx.state, c));
+      playSfx('sale');
+      this.floatMoney(`+${bonus} €`, PAL.mutedGreen);
+      this.policeActive = false;
+      this.copVisible = false;
+      this.advance('neutral');
+      return;
+    }
+    const justified = this.policeJustified;
+    const events = applyPoliceCall(this.ctx.state, justified);
+    const rc = recurringCharacterFor(c);
+    if (justified) {
+      // A fair call (aggressive fraudster / threatening banned person).
+      this.ctx.state.story.reportedTroublemaker = true;
+    } else {
+      // Calling the cops on a harmless insister: an abuse of power.
+      this.ctx.state.story.abusedPower = true;
+      if (rc && rc.id === GAMBLER.id) this.ctx.state.story.calledCopsOnGambler = true;
+    }
+    this.showEvents(events);
+    this.policeActive = false;
+    this.copVisible = false;
+    this.advance(justified ? 'neutral' : 'angry');
   }
 
   // --- change-making sub-step ------------------------------------------------
@@ -677,6 +912,13 @@ export class CounterScene implements Scene {
     // Serving a recurring character raises its storyOnSell flag (e.g. selling jeux
     // to the banned gambler -> enabledGambler, selling to the teen -> soldToMinor).
     this.tagStory(c, 'sell');
+    // Some satirical clients refuse to leave even once the sale is concluded: the
+    // standoff opens AFTER the sale. Don't advance — linger and make a scene.
+    if (c.insistsAfterSale) {
+      this.servedInsister = true;
+      this.enterInsisting(c);
+      return;
+    }
     this.advance(evalR.correct && changeOK ? 'happy' : 'neutral');
   }
 
@@ -900,7 +1142,19 @@ export class CounterScene implements Scene {
         flash(PAL.tobaccoRed, 0.28);
         shake(4, 0.34);
       }
-      this.pushToast(e.message, eventColor(e.type));
+      // Insistence / police outcomes carry a finer-grained `kind` that recolours
+      // the toast (and, for an abuse of power, adds a red flash) without widening
+      // the exhaustive event-colour key.
+      let color = eventColor(e.type);
+      if (e.kind === 'policeJustified' || e.kind === 'policeBonus') {
+        color = '#9ccc65';
+      } else if (e.kind === 'policeAbuse') {
+        color = '#e57373';
+        flash(PAL.tobaccoRed, 0.28);
+      } else if (e.kind === 'reputationDing') {
+        color = '#ffb74d';
+      }
+      this.pushToast(e.message, color);
     }
   }
 
@@ -944,6 +1198,17 @@ export class CounterScene implements Scene {
       return;
     }
 
+    // Insisting standoff: the esclandre meter fills until the client storms off,
+    // unless the player resolves it (céder / police). The arrival cinematic, when
+    // playing, freezes the meter (its tween drives the resolution instead).
+    if (this.step === 'insisting') {
+      if (!this.policeActive) {
+        this.esclandre = Math.min(1, this.esclandre + ESCLANDRE_RATE * sec);
+        if (this.esclandre >= 1) this.stormOff();
+      }
+      return;
+    }
+
     if (this.step !== 'service') return;
     const c = this.client;
     if (!c) return;
@@ -978,10 +1243,30 @@ export class CounterScene implements Scene {
       this.clickBetting(p);
       return;
     }
+    if (this.step === 'insisting') {
+      this.clickInsisting(p);
+      return;
+    }
     this.clickService(p);
   }
 
   private clickService(p: { x: number; y: number }): void {
+    // Radio set on the left ledge: ◀ ▶ change station, the poste toggles play/pause.
+    if (inRect(p, this.radioPrevBox())) {
+      radio.prev();
+      playSfx('radio');
+      return;
+    }
+    if (inRect(p, this.radioNextBox())) {
+      radio.next();
+      playSfx('radio');
+      return;
+    }
+    if (inRect(p, this.radioPosteBox())) {
+      radio.toggle();
+      playSfx('radio');
+      return;
+    }
     // Tool buttons (only react when their rule is active).
     if (this.has('age') && this.btnCNI.hit(p)) return this.btnCNI.click();
     if (this.has('drunk') && this.btnObserve.hit(p)) {
@@ -1037,6 +1322,14 @@ export class CounterScene implements Scene {
     if (this.btnRefusePay.hit(p)) return this.btnRefusePay.click();
   }
 
+  private clickInsisting(p: { x: number; y: number }): void {
+    // Input is locked while the police arrival cinematic plays.
+    if (this.policeActive) return;
+    if (this.btnIgnore.hit(p)) return this.btnIgnore.click();
+    if (this.btnCede.hit(p)) return this.btnCede.click();
+    if (this.btnPolice.hit(p)) return this.btnPolice.click();
+  }
+
   private clickChange(p: { x: number; y: number }): void {
     if (this.tray.hit(p)) {
       this.tray.click(p);
@@ -1060,12 +1353,15 @@ export class CounterScene implements Scene {
     const c = this.client;
     if (c) this.drawWindow(r, c);
 
-    // 3. Wooden counter in the foreground + the FDJ terminal on the back ledge.
+    // 3. Wooden counter in the foreground + the FDJ terminal on the back ledge
+    //    and the radio set on the left ledge.
     drawCounter(r);
     drawTerminalFDJ(r, LAYOUT.terminalFDJ.x + 8, LAYOUT.terminalFDJ.y + 2);
+    this.drawRadioSet(r);
 
-    // 4. Speech bubble with the French request.
-    if (c) this.drawBubble(r, c);
+    // 4. Speech bubble with the French request (replaced by the plea bubble
+    // during an insisting standoff, drawn in the step layer below).
+    if (c && this.step !== 'insisting') this.drawBubble(r, c);
 
     // 5. Top HUD (patience bar + counters) and the day's rules notice.
     this.drawTopBar(r);
@@ -1083,6 +1379,8 @@ export class CounterScene implements Scene {
       this.drawChange(r, c);
     } else if (this.step === 'betting') {
       this.drawBetting(r);
+    } else if (this.step === 'insisting') {
+      if (c) this.drawInsisting(r, c);
     } else if (isBettingClient(c)) {
       // Betting client at the counter: a bet coupon (gently bobbing) + terminal button.
       drawBetSlip(r, 216, 210 + wobble(this.animTime, 1, 1.4), c?.ticket ? PAL.fdjYellow : PAL.fdjRed);
@@ -1129,6 +1427,14 @@ export class CounterScene implements Scene {
     ctx.rect(w.x, w.y, w.w, w.h);
     ctx.clip();
 
+    // During the police-arrival cinematic the troublemaker is being hauled off:
+    // show the empty window recess (the gendarme is drawn over it) — never the
+    // client on top of the cop.
+    if (this.policeActive) {
+      ctx.restore();
+      return;
+    }
+
     // Outgoing client sliding out of frame (cosmetic; already left the queue).
     const out = this.outgoing;
     if (out && out.alpha > 0) {
@@ -1137,6 +1443,7 @@ export class CounterScene implements Scene {
           drunk: out.drunk,
           mood: out.mood,
           look: out.client.look,
+          satireId: out.client.satireId,
         });
       });
     }
@@ -1154,7 +1461,7 @@ export class CounterScene implements Scene {
     const drawY = baseY + bob + this.clientNod;
 
     this.flatten(r, this.clientAlpha, (rr) => {
-      paintClient(rr, drawX, drawY, { drunk, mood, look: c.look });
+      paintClient(rr, drawX, drawY, { drunk, mood, look: c.look, satireId: c.satireId });
     });
     // Blink is drawn directly: it only fires once the fade has settled (alpha 1).
     if (this.blinking > 0) this.drawBlink(r, drawX, drawY, c, drunk);
@@ -1237,6 +1544,13 @@ export class CounterScene implements Scene {
       const m = matchById(this.ctx.state.day, c.ticket.matchId);
       const teams = m ? `${m.teamA}-${m.teamB}` : 'mon match';
       return `J'ai un ticket gagnant sur ${teams}, je viens encaisser !`;
+    }
+    // Pure-gag caricatures (no insisting standoff, no special mechanic) only ever
+    // carry their satirical quip in `plea`: surface it as their opening line so the
+    // parody actually pays off on screen. The requested product still shows on the
+    // counter, so the player can still serve them normally.
+    if (c.satireId && c.plea && !c.insists) {
+      return c.plea;
     }
     return `Bonjour, je voudrais ${c.request.name}.`;
   }
@@ -1360,6 +1674,66 @@ export class CounterScene implements Scene {
     this.drawRulesIcon(r);
   }
 
+  /** The radio set on the counter ledge: poste + station name + EQ when audible. */
+  // Radio sub-zones derived from LAYOUT.radio: poste (play/pause) + ◀ ▶ tune.
+  private get radioPosteX(): number {
+    return LAYOUT.radio.x + 12;
+  }
+  private get radioPosteY(): number {
+    return LAYOUT.radio.y + 11;
+  }
+  private radioPrevBox(): Rect {
+    return { x: LAYOUT.radio.x, y: this.radioPosteY + 3, w: 9, h: 14 };
+  }
+  private radioNextBox(): Rect {
+    return { x: LAYOUT.radio.x + LAYOUT.radio.w - 9, y: this.radioPosteY + 3, w: 9, h: 14 };
+  }
+  private radioPosteBox(): Rect {
+    return { x: this.radioPosteX, y: this.radioPosteY - 2, w: 34, h: 26 };
+  }
+
+  private drawRadioSet(r: Renderer): void {
+    const px = this.radioPosteX;
+    const py = this.radioPosteY;
+    const playing = radio.isPlaying();
+    drawRadio(r, px, py, { playing });
+
+    // Clear ◀ ▶ station buttons flanking the set.
+    this.drawTuneBtn(r, this.radioPrevBox(), 'left');
+    this.drawTuneBtn(r, this.radioNextBox(), 'right');
+
+    // Station name centered BELOW the poste (lit when playing).
+    r.text(radio.getStation().name, px + 17, py + 25, {
+      color: playing ? PAL.fdjYellow : PAL.paper,
+      scale: 1,
+      align: 'center',
+    });
+
+    // Equaliser bars over the speaker grille while sound is actually coming out.
+    if (radio.isAudible()) {
+      const t = this.animTime;
+      for (let i = 0; i < 3; i++) {
+        const h = Math.min(7, Math.max(1, 3 + wobble(t + i * 0.2, 3, 0.4 + i * 0.05)));
+        r.vline(px + 7 + i * 3, py + 15 - h, h, i % 2 === 0 ? PAL.fdjYellow : PAL.mutedGreen);
+      }
+    }
+  }
+
+  /** A small beveled tune button with a directional triangle. */
+  private drawTuneBtn(r: Renderer, b: Rect, dir: 'left' | 'right'): void {
+    r.rect(b.x, b.y, b.w, b.h, PAL.wood);
+    r.hline(b.x, b.y, b.w, PAL.woodLight);
+    r.stroke(b.x, b.y, b.w, b.h, PAL.ink, 1);
+    const W = 4;
+    const x0 = b.x + Math.round((b.w - W) / 2);
+    const yc = b.y + Math.round(b.h / 2);
+    for (let i = 0; i < W; i++) {
+      const fromBase = dir === 'right' ? i : W - 1 - i;
+      const h = (W - fromBase) * 2 - 1;
+      r.vline(x0 + i, yc - Math.floor(h / 2), h, PAL.offWhite);
+    }
+  }
+
   /** Clipboard icon (beveled button) used to open the day's rules popup. */
   private drawRulesIcon(r: Renderer): void {
     const { x, y, w, h } = RULES_ICON;
@@ -1459,13 +1833,8 @@ export class CounterScene implements Scene {
       const dy = LAYOUT.cniSlot.y + Math.round(this.docSlam);
       drawCNI(r, LAYOUT.cniSlot.x, dy, {
         name: c.fullName,
-        birth: formatDate(c.birthDate),
-      });
-      const age = ageFrom(c.birthDate);
-      r.text(`${age} ans aujourd'hui`, LAYOUT.cniSlot.x, dy + LAYOUT.cniSlot.h + 2, {
-        color: PAL.offWhite,
-        scale: 1,
-        align: 'left',
+        birth: `${formatDate(c.birthDate)} (${ageFrom(c.birthDate)} ans)`,
+        country: c.country ?? 'FR',
       });
     }
 
@@ -1503,6 +1872,14 @@ export class CounterScene implements Scene {
         scale: 1,
         align: 'left',
       });
+      // "J'aime pas les maths": show the change-due hint, right-aligned.
+      if (mathHelpEnabled()) {
+        r.text(`à rendre : ${this.changeDue.toFixed(2)} €`, 392, 170, {
+          color: PAL.fdjYellow,
+          scale: 1,
+          align: 'right',
+        });
+      }
     }
     this.tray.draw(r);
     this.btnReset.draw(r);
@@ -1656,6 +2033,57 @@ export class CounterScene implements Scene {
 
     this.btnPay.draw(r);
     this.btnRefusePay.draw(r);
+  }
+
+  /** The insisting standoff layer: plea bubble, esclandre meter, police, controls. */
+  private drawInsisting(r: Renderer, c: Client): void {
+    const sb = LAYOUT.speechBubble;
+    // Hide the plea once the police are arriving (the client is being hauled off).
+    if (!this.policeActive) {
+      const plea = c.plea ?? 'Allez, je vous en supplie, juste cette fois !';
+      drawPleaBubble(r, sb.x, sb.y, sb.w, plea);
+    }
+
+    // The rising "esclandre" (public-scene) meter.
+    this.drawEsclandreMeter(r);
+
+    // Police arrival cinematic: a roof gyrophare (above the frame) + (mid-way) the
+    // cop in the now-empty window. The cop is clipped to the recess; the gyrophare
+    // is left unclipped so it reads as sitting on the roof.
+    if (this.policeActive) {
+      const w = LAYOUT.clientWindow;
+      const cx = w.x + w.w / 2;
+      drawPoliceFlash(r, Math.round(cx - 7), w.y - 6, this.animTime);
+      if (this.copVisible) {
+        const ctx = r.ctx;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(w.x, w.y, w.w, w.h);
+        ctx.clip();
+        drawCop(r, cx, w.y + 30);
+        ctx.restore();
+      }
+    }
+
+    // Three controls: tenir bon / céder / appeler la police (the 3rd verb).
+    this.btnIgnore.draw(r);
+    this.btnCede.draw(r);
+    // A phone icon pairs with the POLICE button to read as "appeler la police".
+    drawPhoneIcon(r, 364, this.btnPolice.rect.y + 2, PAL.offWhite);
+    this.btnPolice.draw(r);
+  }
+
+  /** Draw the labelled esclandre bar (0..1), centered above the standoff buttons. */
+  private drawEsclandreMeter(r: Renderer): void {
+    const x = 130;
+    const y = 226;
+    const w = 220;
+    const h = 8;
+    r.text('ESCLANDRE', x, y - 9, { color: PAL.tobaccoRed, scale: 1, align: 'left' });
+    r.rect(x, y, w, h, PAL.ink);
+    r.stroke(x, y, w, h, PAL.tobaccoRed, 1);
+    const fill = Math.round((w - 2) * Math.max(0, Math.min(1, this.esclandre)));
+    if (fill > 0) r.rect(x + 1, y + 1, fill, h - 2, PAL.fdjRed);
   }
 
   private drawToasts(r: Renderer): void {

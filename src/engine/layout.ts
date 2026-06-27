@@ -30,10 +30,13 @@ export const LAYOUT = {
   speechBubble: { x: 300, y: 36, w: 168, h: 46 } as Rect,
 
   /** CNI / ID document slot on the counter, shown on demand. */
-  cniSlot: { x: 20, y: 148, w: 152, h: 88 } as Rect,
+  cniSlot: { x: 18, y: 150, w: 162, h: 86 } as Rect,
 
   /** FDJ terminal seat on the right of the counter. */
   terminalFDJ: { x: 392, y: 150, w: 76, h: 60 } as Rect,
+
+  /** Radio set on the left ledge: poste (play/pause) flanked by ◀▶ tune buttons. */
+  radio: { x: 10, y: 200, w: 62, h: 46 } as Rect,
 
   /** Bottom strip reserved for action buttons. */
   toolBar: { x: 0, y: 244, w: VW, h: VH - 244 } as Rect,

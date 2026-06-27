@@ -4,13 +4,24 @@
 // plus the occasional bluff (fake / out-of-stock) opportunity. Runtime randomness
 // uses Math.random — fine in the browser; only the build sandbox forbids it.
 
-import type { Client, Product, Category, ClientLook, RuleType, BetPick, MatchInfo } from '../types';
+import type { Client, Product, Category, ClientLook, RuleType, BetPick, MatchInfo, Country } from '../types';
 import { TODAY } from '../types';
 import { PRODUCTS, FAKE_PRODUCTS, productsInGroups } from './products';
 import { RULES } from '../rules';
 import { unlockedGroupsForDay, weekOf } from './days';
 import { matchesForDay, outcomeFromScore, hasStarted, nextClock, START_CLOCK } from './matches';
 import { GAMBLER, GINETTE, TEEN, FRAUDSTER, recurringIdsForDay } from './characters';
+import {
+  BEN_LADEN,
+  ZUCKERBERG,
+  TRUMP,
+  DEPARDIEU,
+  GRETA,
+  KIRK,
+  MACRON,
+  HANOUNA,
+  satireIdsForDay,
+} from './characters';
 
 /** Truly random client-count bounds: each day's roster size is in [MIN, MAX]. */
 export const MIN_CLIENTS: number = 4;
@@ -52,6 +63,17 @@ function shuffle<T>(a: T[]): T[] {
   return a;
 }
 
+// --- nationality -------------------------------------------------------------
+// CNI nationality for ordinary (generated) clients. INFORMATIONAL only — no rule
+// reads it. Distribution: 80% France, the remaining 20% split evenly among the
+// four others (US, IL, SA, PS).
+
+const OTHER_COUNTRIES: readonly Country[] = ['US', 'IL', 'SA', 'PS'];
+
+function randomCountry(): Country {
+  return chance(0.8) ? 'FR' : pick(OTHER_COUNTRIES);
+}
+
 // --- appearance variety ------------------------------------------------------
 
 const SKINS = ['#b78a63', '#8a6244', '#c79a72', '#a87a54', '#6e4a30'];
@@ -70,16 +92,40 @@ function autoLook(): ClientLook {
   };
 }
 
+// --- insistence pleas --------------------------------------------------------
+// FRENCH lines shown while a refused client digs in (the insisting standoff).
+// Generic insisters are sympathetic (calling the cops on them is an abuse);
+// aggressive ones threaten the counter (a police call is justified).
+
+const GENERIC_PLEAS = [
+    'Tout ce que je peux te dire, c\'est que je peux pas te dire',
+  'Allez, soyez sympa, juste cette fois !',
+  'Quoi ? Vous plaisantez ? Servez-moi, enfin !',
+  "J'aime les hommes, ne me faites pas ça…",
+  'Faites une exception, ça restera entre nous.',
+  "Tout le monde fait ça, où est le problème ?",
+    "Génération de tahan fahan, s'il te plait"
+];
+const AGGRESSIVE_PLEAS = [
+    "GamixTreize était plus gentil",
+    'Ton gros crane sah dépêche toi…',
+    'Je vais te faire bouffer mes couilles !',
+  'Tu vas me servir, oui ? Sinon ça va chauffer !',
+  'Refuse encore et tu vas le regretter, crois-moi.',
+  "Donne-moi ça tout de suite, j'ai pas que ça à faire !",
+];
+
 // --- names -------------------------------------------------------------------
 
 const FIRST_NAMES = [
   'Jean', 'Marie', 'Lucas', 'Chloé', 'Karim', 'Sophie', 'Paulo', 'Emma', 'Hugo', 'Léa',
   'Kevin', 'Fatima', 'Dylan', 'Nadia', 'Bernard', 'Ginette', 'Mohamed', 'Camille', 'Yanis', 'Josette',
-  'Mathéo', 'Sabrina', 'Robert', 'Inès', 'Bryan', 'Aurélie',
+  'Mathéo', 'Sabrina', 'Robert', 'Inès', 'Bryan', 'Aurélie', 'Tom', 'Guillaume', 'Gwen', 'Joan'
 ];
 const LAST_NAMES = [
   'Dupont', 'Lefevre', 'Martin', 'Bernard', 'Benali', 'Moreau', 'Da Silva', 'Petit', 'Garnier', 'Trotignon',
   'Mercier', 'Bonnet', 'Faure', 'Rousseau', 'Lopez', 'Nguyen', 'Marchand', 'Charpentier', 'Da Costa', 'Fontaine',
+  'Pereira'
 ];
 
 /** A unique full name within the given day's roster. */
@@ -232,14 +278,38 @@ function genClient(day: number, used: Set<string>, forced: Spec = {}): Client {
       : 20 + rint(25)
     : 40 + rint(30);
 
+  // Occasional insistence: a refused client may dig in instead of leaving. More
+  // likely for the dodgy cases (minor/drunk/banned/bluff), where refusing is the
+  // correct call and the standoff actually has teeth. Drunk/banned troublemakers
+  // can turn aggressive — which makes a police call justified; ordinary insisters
+  // are merely sympathetic, so calling the cops on them is an abuse of power.
+  const dodgy = Boolean(forced.minor || forced.drunk || forced.banned || forced.fake) || isDrunk || banned;
+  let insists = false;
+  let plea: string | undefined;
+  let policeWorthy: boolean | undefined;
+  if (chance(dodgy ? 0.5 : 0.12)) {
+    insists = true;
+    if ((isDrunk || banned) && chance(0.5)) {
+      policeWorthy = true;
+      plea = pick(AGGRESSIVE_PLEAS);
+    } else {
+      policeWorthy = false;
+      plea = pick(GENERIC_PLEAS);
+    }
+  }
+
   return makeClient({
     request,
     birthDate,
     isDrunk,
     onBanList: banned,
     fullName: genName(used),
+    country: randomCountry(),
     gullibility,
     patience: 60 + rint(41), // 60..100
+    insists,
+    plea,
+    policeWorthy,
   });
 }
 
@@ -282,6 +352,7 @@ function genBettingClient(
     isDrunk: false,
     onBanList: false,
     fullName: genName(used),
+    country: randomCountry(),
     gullibility: 40 + rint(30),
     patience: 60 + rint(41),
     fraudster: fraud,
@@ -335,6 +406,11 @@ function makeGamblerClient(day: number, used: Set<string>): Client {
     look: GAMBLER.look,
     gullibility: 75, // pleads hard
     patience: 100,
+    // He never takes a refusal: he begs. Calling the police on a desperate addict
+    // is cruel, never justified (policeWorthy: false) — a dark epilogue beat.
+    insists: true,
+    plea: 'Allez, juste un dernier grattage, je vous en supplie… je me refais et j\'arrête, promis !',
+    policeWorthy: false,
   });
 }
 
@@ -354,6 +430,10 @@ function makeGinetteClient(day: number, used: Set<string>): Client {
     look: GINETTE.look,
     gullibility: 30,
     patience: 100,
+    // If wrongly turned away, she gently insists — never grounds for the police.
+    insists: true,
+    plea: 'Oh, mon petit, ne soyez pas méchant avec une vieille dame… servez-moi donc.',
+    policeWorthy: false,
   });
 }
 
@@ -385,6 +465,11 @@ function makeFraudsterClient(day: number, used: Set<string>): Client {
   const client = genBettingClient(day, used, mode, true);
   client.fullName = FRAUDSTER.fullName;
   client.look = FRAUDSTER.look;
+  // A returning scammer who turns aggressive when caught: refusing him triggers a
+  // standoff, and calling the police on him is fully JUSTIFIED.
+  client.insists = true;
+  client.plea = 'Tu vas me payer ce ticket, oui ?! Fais pas le malin avec moi !';
+  client.policeWorthy = true;
   return client;
 }
 
@@ -396,6 +481,173 @@ function recurringClientsForDay(day: number, used: Set<string>): Client[] {
     else if (id === GINETTE.id) out.push(makeGinetteClient(day, used));
     else if (id === TEEN.id) out.push(makeTeenClient(day, used));
     else if (id === FRAUDSTER.id) out.push(makeFraudsterClient(day, used));
+  }
+  return out;
+}
+
+// --- satire caricatures ------------------------------------------------------
+// Real-name public-figure parody clients (identity/look/schedule in
+// content/characters.ts). Each maps to one mechanic; they are tagged with
+// Client.satireId so the sprite draws the caricature and the scenes branch.
+
+/** 1. Ben Laden: legal kombucha, but won't leave even after the sale; snitching pays. */
+function makeBenLadenClient(_day: number, used: Set<string>): Client {
+  used.add(BEN_LADEN.fullName);
+  return makeClient({
+    satireId: BEN_LADEN.id,
+    request: productById('ciao-kombucha'),
+    birthDate: birthDateForAge(60),
+    fullName: BEN_LADEN.fullName,
+    look: BEN_LADEN.look,
+    country: BEN_LADEN.country,
+    gullibility: 20,
+    patience: 100,
+    // Insists BEFORE and AFTER the sale; calling the police pays a +500 € bonus
+    // (satirical snitch reward) instead of the normal reputation outcome.
+    insists: true,
+    insistsAfterSale: true,
+    policeWorthy: true,
+    policeBonus: 500,
+    plea: 'Je ne bouge pas d\'ici tant que vous ne m\'avez pas livré toute la réserve de kombucha.',
+  });
+}
+
+/** 2. Zuckerberg: wants to buy the whole shelf / pay in data — a fake product to refuse. */
+function makeZuckerbergClient(_day: number, used: Set<string>): Client {
+  used.add(ZUCKERBERG.fullName);
+  return makeClient({
+    satireId: ZUCKERBERG.id,
+    request: productById('virgam-sacre'), // fake -> REFUSER ou BLUFFER
+    birthDate: birthDateForAge(40),
+    fullName: ZUCKERBERG.fullName,
+    look: ZUCKERBERG.look,
+    country: ZUCKERBERG.country,
+    gullibility: 70, // easy to bluff
+    patience: 90,
+    insists: true,
+    policeWorthy: false,
+    plea: 'Je rachète tout le rayon. Je vous paie en données personnelles, c\'est bien mieux que de l\'argent.',
+  });
+}
+
+/** 3. Trump: fraudster on a fake product, bluffs / tries to leave without paying. */
+function makeTrumpClient(_day: number, used: Set<string>): Client {
+  used.add(TRUMP.fullName);
+  return makeClient({
+    satireId: TRUMP.id,
+    request: productById('ticket-couilles'), // fake jeux -> refuse / bluff
+    birthDate: birthDateForAge(78),
+    fullName: TRUMP.fullName,
+    look: TRUMP.look,
+    country: TRUMP.country,
+    gullibility: 30,
+    patience: 80,
+    fraudster: true,
+    insists: true,
+    policeWorthy: true, // a real fraudster: a fair police call
+    plea: 'C\'est offert par la maison, non ? Je suis quelqu\'un de très important, je paierai plus tard.',
+  });
+}
+
+/** 4. Depardieu: drunk, wants alcohol — the ivresse refusal (cops would be abuse). */
+function makeDepardieuClient(day: number, used: Set<string>): Client {
+  used.add(DEPARDIEU.fullName);
+  return makeClient({
+    satireId: DEPARDIEU.id,
+    request: pickProduct(day, 'alcool'),
+    birthDate: birthDateForAge(77),
+    isDrunk: true,
+    fullName: DEPARDIEU.fullName,
+    look: DEPARDIEU.look,
+    country: DEPARDIEU.country,
+    gullibility: 40,
+    patience: 90,
+    insists: true,
+    policeWorthy: false, // just drunk -> calling the cops is an abuse
+    plea: 'Allez, un dernier verre, je tiens parfaitement debout, regarde !',
+  });
+}
+
+/** 5. Greta: an eco esclandre — a sympathetic insister (cops would be abuse). */
+function makeGretaClient(_day: number, used: Set<string>): Client {
+  used.add(GRETA.fullName);
+  return makeClient({
+    satireId: GRETA.id,
+    request: productById('bouteille-eau'), // legal sale; the trap is refusing her
+    birthDate: birthDateForAge(23),
+    fullName: GRETA.fullName,
+    look: GRETA.look,
+    country: GRETA.country,
+    gullibility: 25,
+    patience: 100,
+    insists: true,
+    policeWorthy: false,
+    plea: 'Comment osez-vous ?! Vous vendez du poison pendant que la planète brûle !',
+  });
+}
+
+/** 6. Charlie Kirk: aggressive political harangue — a justified police call. */
+function makeKirkClient(_day: number, used: Set<string>): Client {
+  used.add(KIRK.fullName);
+  return makeClient({
+    satireId: KIRK.id,
+    request: productById('marlboro-gold'),
+    birthDate: birthDateForAge(35),
+    fullName: KIRK.fullName,
+    look: KIRK.look,
+    country: KIRK.country,
+    gullibility: 30,
+    patience: 70,
+    insists: true,
+    policeWorthy: true, // aggressive harangue: a fair call
+    plea: 'Tu vas me servir, oui ?! C\'est ça, ta liberté ? Débats-toi si tu l\'oses, petit !',
+  });
+}
+
+/** 7. Macron: clean tabac sale with the « en même temps » gag (no special mechanic). */
+function makeMacronClient(_day: number, used: Set<string>): Client {
+  used.add(MACRON.fullName);
+  return makeClient({
+    satireId: MACRON.id,
+    request: productById('marlboro-red'),
+    birthDate: birthDateForAge(48),
+    fullName: MACRON.fullName,
+    look: MACRON.look,
+    country: MACRON.country,
+    gullibility: 50,
+    patience: 100,
+    plea: 'Je veux du tabac, et en même temps je l\'interdis. Les deux à la fois, vous me suivez ?',
+  });
+}
+
+/** 8. Hanouna: a loud, expensive purchase — a big-change test (no special mechanic). */
+function makeHanounaClient(_day: number, used: Set<string>): Client {
+  used.add(HANOUNA.fullName);
+  return makeClient({
+    satireId: HANOUNA.id,
+    request: productById('kit-vape'), // 29,90 € -> large change to compose
+    birthDate: birthDateForAge(52),
+    fullName: HANOUNA.fullName,
+    look: HANOUNA.look,
+    country: HANOUNA.country,
+    gullibility: 50,
+    patience: 100,
+    plea: 'Allez allez allez, je prends tout, et au prix fort ! TPMP au comptoir !',
+  });
+}
+
+/** Build the Client objects for every satire caricature scheduled on `day`. */
+function satireClientsForDay(day: number, used: Set<string>): Client[] {
+  const out: Client[] = [];
+  for (const id of satireIdsForDay(day)) {
+    if (id === BEN_LADEN.id) out.push(makeBenLadenClient(day, used));
+    else if (id === ZUCKERBERG.id) out.push(makeZuckerbergClient(day, used));
+    else if (id === TRUMP.id) out.push(makeTrumpClient(day, used));
+    else if (id === DEPARDIEU.id) out.push(makeDepardieuClient(day, used));
+    else if (id === GRETA.id) out.push(makeGretaClient(day, used));
+    else if (id === KIRK.id) out.push(makeKirkClient(day, used));
+    else if (id === MACRON.id) out.push(makeMacronClient(day, used));
+    else if (id === HANOUNA.id) out.push(makeHanounaClient(day, used));
   }
   return out;
 }
@@ -418,6 +670,12 @@ export function dayRoster(day: number): Client[] {
   // Recurring narrative cast first (fixed identities), within the hard cap. They
   // count toward the day's size; random fill tops up the rest as usual.
   for (const c of recurringClientsForDay(day, used)) {
+    if (roster.length < MAX_CLIENTS) roster.push(c);
+  }
+
+  // Satire caricatures scheduled today (fixed identities, special mechanics),
+  // injected like the recurring cast and counted toward the day's size.
+  for (const c of satireClientsForDay(day, used)) {
     if (roster.length < MAX_CLIENTS) roster.push(c);
   }
 

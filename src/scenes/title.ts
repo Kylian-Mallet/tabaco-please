@@ -6,8 +6,10 @@ import { PAL } from '../engine/palette';
 import { Button } from '../engine/ui';
 import { drawCigarettePack } from '../engine/sprites';
 import { load } from '../engine/save';
+import { playSfx } from '../engine/sfx';
 import { freshState } from '../main';
 import { DayIntroScene } from './dayIntro';
+import { version as APP_VERSION } from '../../package.json';
 import { OnboardingScene } from './onboarding';
 
 // Small deterministic noise so textures look hand-placed, not random.
@@ -67,6 +69,7 @@ export class TitleScene implements Scene {
    * so reload it from disk before navigating instead of trusting ctx.state.
    */
   private continueSaved(): void {
+    playSfx('click');
     const saved = load();
     if (saved) Object.assign(this.ctx.state, saved);
     this.ctx.goTo(new DayIntroScene(this.ctx));
@@ -74,6 +77,7 @@ export class TitleScene implements Scene {
 
   /** Reset the run to a fresh campaign, then run onboarding. */
   private startNewGame(): void {
+    playSfx('click');
     Object.assign(this.ctx.state, freshState());
     this.ctx.goTo(new OnboardingScene(this.ctx));
   }
@@ -216,7 +220,7 @@ export class TitleScene implements Scene {
     r.text('TABACO PLEASE', VW / 2, titleY, { color: PAL.fdjYellow, scale: 3, align: 'center' });
 
     // --- Subtitle -------------------------------------------------------
-    r.text('Tabac-presse d Aussonne', VW / 2, 200, {
+    r.text('Tabac-presse d\'Aussonne', VW / 2, 200, {
       color: PAL.paper,
       scale: 1,
       align: 'center',
@@ -228,7 +232,7 @@ export class TitleScene implements Scene {
     this.newGame.draw(r);
 
     // --- Footer ---------------------------------------------------------
-    r.text('v0.1', VW - 4, VH - 9, { color: PAL.wallDark, scale: 1, align: 'right' });
+    r.text(`v${APP_VERSION}`, VW - 4, VH - 9, { color: PAL.wallDark, scale: 1, align: 'right' });
   }
 
   /** Pixel red tabac lozenge: vertical lozenge with a mount bracket + cream band. */

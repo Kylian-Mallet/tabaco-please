@@ -5,16 +5,27 @@ import { VW, VH } from '../engine/renderer';
 import { PAL } from '../engine/palette';
 import { Button, Panel } from '../engine/ui';
 import { drawClient } from '../engine/sprites';
+import { playSfx } from '../engine/sfx';
 import { DayIntroScene } from './dayIntro';
 
 /** Hard cap on the typed seller name. */
 const MAX_NAME = 16;
 
-/** Scripted intro cards (FR) — sets the scene + announces the one-month trial. */
+/** The first cards set the scene; the rest brief the player on the mechanics. */
+const SCENE_CARD_COUNT = 3;
+
+/** Scripted intro cards (FR) — scene-setting, then a how-it-works briefing. */
 const INTRO_CARDS: string[] = [
+  // --- Scene (0..SCENE_CARD_COUNT-1) ---
   "Aussonne, Haute-Garonne. Aux portes de la métropole toulousaine, le tabac-presse du centre cherche un repreneur. C'est vous.",
   "L'État vous nomme préposé au guichet : tabac, presse, jeux. Vous encaissez, vous rendez la monnaie, vous faites respecter la loi.",
   "Un mois d'essai. 30 jours pour faire vos preuves... ou mettre la clé sous la porte. Bonne chance, préposé.",
+  // --- Mechanics briefing ---
+  "AU COMPTOIR. Chaque client demande un produit : à vous de VENDRE ou de REFUSER. Sur une vente, encaissez et rendez la monnaie au centime près — la caisse doit toujours tomber juste.",
+  "LES PAPIERS (le froid). Tabac, alcool et jeux sont interdits aux moins de 18  ans : demandez la CARTE D'IDENTITÉ et vérifiez la date de naissance. Les interdits de jeu figurent au FICHIER : recoupez le nom.",
+  "LE FLAIR (le chaud). L'ivresse ne se lit sur aucun papier : observez le client avant de servir de l'alcool. Et s'il réclame un produit qu'on n'a pas, vous pouvez REFUSER... ou BLUFFER en refourguant autre chose, s'il ne vous crame pas.",
+  "L'AUTORITÉ. Un client refusé peut s'entêter et faire un esclandre. Vous pouvez APPELER LA POLICE — mais à bon escient : la lancer sur un client légitime, c'est un abus de pouvoir qui ternit votre réputation.",
+  "AU FIL DU MOIS. De nouvelles règles, de nouveaux rayons (CBD, presse, vape) et les PARIS SPORTIFS au terminal FDJ se débloquent semaine après semaine. Tenez 30 jours et soignez vos comptes.",
 ];
 
 // Avatar trait options (PAL colors only). Indices map 1:1 to ClientLook fields.
@@ -128,16 +139,19 @@ export class OnboardingScene implements Scene {
   // --- step transitions ------------------------------------------------------
 
   private advanceIntro(): void {
+    playSfx('click');
     if (this.cardIdx < INTRO_CARDS.length - 1) this.cardIdx++;
     else this.step = 1;
   }
 
   private confirmName(): void {
     if (this.name.trim().length === 0) return;
+    playSfx('click');
     this.step = 2;
   }
 
   private cycle(trait: number, dir: number): void {
+    playSfx('click');
     const n = this.counts[trait];
     this.idx[trait] = (this.idx[trait] + dir + n) % n;
   }
@@ -153,6 +167,7 @@ export class OnboardingScene implements Scene {
   }
 
   private commence(): void {
+    playSfx('click');
     this.ctx.state.playerName = this.name.trim();
     this.ctx.state.sellerLook = this.currentLook();
     this.teardown();
@@ -205,7 +220,8 @@ export class OnboardingScene implements Scene {
   }
 
   private renderIntro(r: Renderer): void {
-    r.text("MOIS D'ESSAI", VW / 2, 48, { color: PAL.fdjYellow, scale: 2, align: 'center' });
+    const title = this.cardIdx < SCENE_CARD_COUNT ? "MOIS D'ESSAI" : 'COMMENT ÇA MARCHE';
+    r.text(title, VW / 2, 48, { color: PAL.fdjYellow, scale: 2, align: 'center' });
 
     const cx = 70;
     const cw = 340;

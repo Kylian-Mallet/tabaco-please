@@ -7,6 +7,17 @@
 import type { Renderer } from './renderer';
 import { PAL } from './palette';
 import { LAYOUT } from './layout';
+import { type Country } from '../game/types';
+
+// Two tones the base PAL lacks but the real-name caricatures need: a flat
+// hoodie/grey-hair grey and the infamous spray-tan orange. Kept local to the
+// satire overlay so the general palette stays the canonical 16 colors.
+const SATIRE = {
+  /** Grey hoodie fabric / greying hair. */
+  hoodieGrey: '#6f7276',
+  /** Spray-tan orange skin tint. */
+  trumpOrange: '#c47a3c',
+} as const;
 
 // --- small deterministic noise so the wall / wood look hand-placed, not random
 function hash2(x: number, y: number): number {
@@ -146,6 +157,8 @@ export function drawClient(
     drunk?: boolean;
     mood?: 'neutral' | 'angry' | 'happy';
     look?: import('../game/types').ClientLook;
+    /** Real-name caricature id (e.g. 'ben-laden'); draws a recognizable overlay. */
+    satireId?: string;
   }
 ): void {
   const mood = opts.mood ?? 'neutral';
@@ -302,6 +315,281 @@ export function drawClient(
     r.px(x - 1, eyeY + 5, PAL.tobaccoRed);
     r.px(x, eyeY + 5, PAL.tobaccoRed);
   }
+
+  // --- Satirical caricature overlay (drawn last, over the finished bust) ---
+  if (opts.satireId) {
+    drawSatireAccessory(r, x, y, opts.satireId, { drunk: opts.drunk });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Satire accessory — per-character recognizable overlay layered on top of a
+// finished drawClient bust. Recomputes the same head/torso geometry from
+// (x, y, droop) so it can also be called standalone by the counter after
+// drawClient. Unknown ids draw nothing. Hard pixel edges, no AA.
+// ---------------------------------------------------------------------------
+export function drawSatireAccessory(
+  r: Renderer,
+  x: number,
+  y: number,
+  satireId: string,
+  opts?: { drunk?: boolean }
+): void {
+  const droop = opts?.drunk ? 2 : 0;
+  // Mirror drawClient's framing exactly so overlays register pixel-perfect.
+  const hw = 28;
+  const hh = 30;
+  const hx = x - hw / 2;
+  const hy = y - 2 + droop;
+  const coatW = 56;
+  const coatH = 30;
+  const coatX = x - coatW / 2;
+  const coatY = y + 26 + droop;
+  const eyeY = hy + 11 + droop;
+  const lex = hx + 7;
+  const rex = hx + hw - 9;
+  const my = hy + 23 + droop;
+
+  switch (satireId) {
+    // -- Oussama Ben Laden: white turban + long dark beard + robe collar. --
+    case 'ben-laden': {
+      // Long dark beard hanging from the cheeks down over the robe collar.
+      const bx = hx + 2;
+      const bTop = eyeY + 3;
+      const bBot = coatY + 9;
+      r.rect(bx, bTop, hw - 4, bBot - bTop, PAL.woodDark);
+      // Taper the beard to a point at the bottom.
+      r.hline(bx + 2, bBot, hw - 8, PAL.woodDark);
+      r.hline(bx + 5, bBot + 1, hw - 14, PAL.woodDark);
+      r.hline(x - 2, bBot + 2, 4, PAL.woodDark);
+      // Darkest strands woven through the beard.
+      for (let gy = bTop; gy < bBot; gy++) {
+        for (let gx = bx + 1; gx < bx + hw - 5; gx += 2) {
+          if (hash2(gx, gy) > 0.5) r.px(gx, gy, PAL.ink);
+        }
+      }
+      r.stroke(bx, bTop, hw - 4, bBot - bTop, PAL.ink, 1);
+      // Moustache linking into the beard.
+      r.hline(x - 5, my - 3, 10, PAL.ink);
+      // Robe collar peeking from under the beard.
+      r.rect(coatX + 6, coatY + 8, coatW - 12, 4, PAL.paper);
+      r.stroke(coatX + 6, coatY + 8, coatW - 12, 4, PAL.ink, 1);
+      // White turban wrapped over the head.
+      r.rect(hx - 2, hy - 7, hw + 4, 11, PAL.offWhite);
+      r.hline(hx - 1, hy - 6, hw + 2, PAL.paper); // upper sheen
+      r.hline(hx, hy - 3, hw, PAL.skinShadow); // wrap fold shade
+      r.hline(hx + 1, hy + 1, hw - 2, PAL.skinShadow); // lower wrap fold
+      r.px(x, hy - 6, PAL.fdjYellow); // tiny front knot/jewel
+      r.px(x - 1, hy - 5, PAL.fdjYellow);
+      r.stroke(hx - 2, hy - 7, hw + 4, 11, PAL.ink, 1);
+      break;
+    }
+
+    // -- Mark Zuckerberg: grey hoodie + pale face + flat fringe. --
+    case 'zuckerberg': {
+      const grey = SATIRE.hoodieGrey;
+      // Grey hoodie over the torso.
+      r.rect(coatX, coatY, coatW, coatH, grey);
+      r.stroke(coatX, coatY, coatW, coatH, PAL.ink, 1);
+      r.hline(coatX + 2, coatY + 1, coatW - 4, PAL.offWhite); // collar light
+      // Hood framing the face (sides + crown), with an inner shadow rim.
+      r.rect(hx - 6, hy - 7, 6, hh + 9, grey); // left hood
+      r.rect(hx + hw, hy - 7, 6, hh + 9, grey); // right hood
+      r.rect(hx - 6, hy - 7, hw + 12, 6, grey); // hood crown
+      r.stroke(hx - 6, hy - 7, 6, hh + 9, PAL.ink, 1);
+      r.stroke(hx + hw, hy - 7, 6, hh + 9, PAL.ink, 1);
+      r.hline(hx - 6, hy - 7, hw + 12, PAL.ink);
+      r.vline(hx - 1, hy - 1, hh, PAL.shadow);
+      r.vline(hx + hw, hy - 1, hh, PAL.shadow);
+      // Hood drawstrings.
+      r.vline(x - 6, coatY, 8, PAL.offWhite);
+      r.vline(x + 6, coatY, 7, PAL.offWhite);
+      // Pale forehead + flat straight fringe (Caesar cut) above the brows.
+      r.rect(hx + 1, hy + 1, hw - 2, 7, PAL.paper);
+      r.rect(hx + 1, hy + 2, hw - 2, 5, PAL.woodDark);
+      r.hline(hx + 1, hy + 2, hw - 2, PAL.wallDark);
+      // Pale cheeks to sell the bloodless complexion.
+      r.rect(hx + 3, eyeY + 4, 4, 4, PAL.paper);
+      r.rect(hx + hw - 7, eyeY + 4, 4, 4, PAL.paper);
+      break;
+    }
+
+    // -- Donald Trump: orange face + blond comb-over + red tie. --
+    case 'trump': {
+      const orange = SATIRE.trumpOrange;
+      // Orange tint around (not over) the features.
+      r.rect(hx + 1, hy + 1, hw - 2, 8, orange); // forehead
+      r.rect(hx + 1, eyeY - 1, 5, 16, orange); // left cheek
+      r.rect(hx + hw - 6, eyeY - 1, 5, 16, orange); // right cheek
+      r.rect(hx + 4, my + 1, hw - 8, 5, orange); // chin / jowls
+      r.px(x - 3, my - 1, orange);
+      r.px(x + 3, my - 1, orange);
+      // Pale 'goggle tan' rings around the eyes.
+      r.hline(lex - 1, eyeY - 1, 7, PAL.paper);
+      r.hline(rex - 1, eyeY - 1, 7, PAL.paper);
+      // Blond comb-over swept forward across the forehead.
+      r.rect(hx - 1, hy - 5, hw + 2, 7, PAL.fdjYellow);
+      r.rect(hx, hy - 1, hw, 4, PAL.fdjYellow); // fringe onto the forehead
+      for (let k = 0; k < hw - 2; k += 2) {
+        const yy = hy - 4 + Math.floor(k / 6); // diagonal combed sweep
+        r.px(hx + k, yy, PAL.offWhite);
+      }
+      r.stroke(hx - 1, hy - 5, hw + 2, 7, PAL.ink, 1);
+      r.hline(hx, hy + 2, hw, PAL.fdjYellow); // hard front fringe line
+      // Long red power tie down the suit.
+      r.rect(x - 1, coatY + 1, 4, 3, PAL.fdjRed); // knot
+      r.rect(x, coatY + 4, 3, coatH - 5, PAL.fdjRed); // blade
+      r.px(x, coatY + 4, PAL.tobaccoRed);
+      break;
+    }
+
+    // -- Gerard Depardieu: larger build + flushed cheeks/nose + greyish hair. --
+    case 'depardieu': {
+      const grey = SATIRE.hoodieGrey;
+      // Bulkier shoulders.
+      r.rect(coatX - 6, coatY + 5, 8, coatH - 5, PAL.wallDark);
+      r.rect(coatX + coatW - 2, coatY + 5, 8, coatH - 5, PAL.wallDark);
+      r.stroke(coatX - 6, coatY + 5, 8, coatH - 5, PAL.ink, 1);
+      r.stroke(coatX + coatW - 2, coatY + 5, 8, coatH - 5, PAL.ink, 1);
+      // Fuller jowls + double chin.
+      r.rect(hx - 3, hy + 17, 4, 11, PAL.skin);
+      r.rect(hx + hw - 1, hy + 17, 4, 11, PAL.skin);
+      r.stroke(hx - 3, hy + 17, 4, 11, PAL.skinShadow, 1);
+      r.stroke(hx + hw - 1, hy + 17, 4, 11, PAL.skinShadow, 1);
+      r.rect(hx + 4, hy + hh - 1, hw - 8, 3, PAL.skin);
+      r.hline(hx + 4, hy + hh - 1, hw - 8, PAL.skinShadow);
+      // Flushed red cheeks + bulbous red nose + broken veins.
+      r.rect(hx + 3, eyeY + 4, 5, 4, PAL.tobaccoRed);
+      r.rect(hx + hw - 8, eyeY + 4, 5, 4, PAL.tobaccoRed);
+      r.rect(x - 2, eyeY + 4, 4, 4, PAL.fdjRed);
+      r.px(x - 1, eyeY + 3, PAL.fdjRed);
+      r.px(x + 2, eyeY + 5, PAL.tobaccoRed);
+      for (let gx = hx + 2; gx < hx + hw - 2; gx += 3) {
+        if (hash2(gx, eyeY) > 0.5) r.px(gx, eyeY + 7, PAL.fdjRed);
+      }
+      // Greyish swept hair.
+      r.rect(hx - 1, hy - 4, hw + 2, 6, grey);
+      r.rect(hx - 2, hy - 1, 3, 10, grey);
+      r.rect(hx + hw - 1, hy - 1, 3, 10, grey);
+      for (let gx = hx; gx < hx + hw; gx += 2) {
+        if (hash2(gx, hy) > 0.5) r.px(gx, hy - 2, PAL.offWhite);
+      }
+      r.stroke(hx - 1, hy - 4, hw + 2, 6, PAL.ink, 1);
+      break;
+    }
+
+    // -- Greta Thunberg: twin braids + bright yellow raincoat. --
+    case 'greta': {
+      // Bright yellow raincoat.
+      r.rect(coatX, coatY, coatW, coatH, PAL.fdjYellow);
+      r.stroke(coatX, coatY, coatW, coatH, PAL.ink, 1);
+      r.hline(coatX + 2, coatY + 1, coatW - 4, PAL.offWhite); // sheen
+      r.rect(x - 1, coatY + 2, 2, coatH - 3, PAL.woodDark); // zip seam
+      r.px(x - 4, coatY + 8, PAL.woodDark); // toggles
+      r.px(x + 4, coatY + 8, PAL.woodDark);
+      r.px(x - 4, coatY + 16, PAL.woodDark);
+      r.px(x + 4, coatY + 16, PAL.woodDark);
+      // Raincoat hood/collar behind the neck.
+      r.rect(x - 9, coatY - 1, 18, 4, PAL.fdjYellow);
+      r.stroke(x - 9, coatY - 1, 18, 4, PAL.ink, 1);
+      // Centre-parted hair.
+      r.rect(hx - 1, hy - 4, hw + 2, 6, PAL.woodDark);
+      r.vline(x, hy - 4, 5, PAL.wood);
+      // Twin braids hanging down each side over the coat.
+      const braid = PAL.woodDark;
+      const braidL = hx - 3;
+      const braidR = hx + hw - 1;
+      for (let s = 0; s < 6; s++) {
+        const by = hy + 6 + s * 4;
+        const off = s % 2 === 0 ? 0 : 1; // alternate for a plaited look
+        r.rect(braidL - off, by, 5, 4, braid);
+        r.rect(braidR + off, by, 5, 4, braid);
+        r.hline(braidL - off, by, 5, PAL.wood);
+        r.hline(braidR + off, by, 5, PAL.wood);
+      }
+      // Red hair ties at the bottom of each braid.
+      r.rect(braidL, hy + 30, 5, 2, PAL.tobaccoRed);
+      r.rect(braidR, hy + 30, 5, 2, PAL.tobaccoRed);
+      break;
+    }
+
+    // -- Charlie Kirk: slick side-part + collar + red ball cap. --
+    case 'kirk': {
+      // Slick dark hair at the temples (under the cap).
+      r.rect(hx - 1, hy + 1, 4, 8, PAL.woodDark);
+      r.rect(hx + hw - 3, hy + 1, 4, 8, PAL.woodDark);
+      // Open shirt collar over the suit (no tie).
+      r.rect(x - 9, coatY, 7, 6, PAL.offWhite);
+      r.rect(x + 2, coatY, 7, 6, PAL.offWhite);
+      r.px(x - 3, coatY + 1, PAL.ink); // collar notch
+      r.px(x + 3, coatY + 1, PAL.ink);
+      r.stroke(x - 9, coatY, 7, 6, PAL.skinShadow, 1);
+      r.stroke(x + 2, coatY, 7, 6, PAL.skinShadow, 1);
+      // Red ball cap: crown + forward visor.
+      r.rect(hx - 2, hy - 7, hw + 4, 8, PAL.fdjRed);
+      r.hline(hx - 1, hy - 7, hw + 2, PAL.tobaccoRed); // lit top
+      r.stroke(hx - 2, hy - 7, hw + 4, 8, PAL.ink, 1);
+      r.rect(hx - 7, hy + 1, 15, 3, PAL.fdjRed); // visor
+      r.hline(hx - 7, hy + 1, 15, PAL.tobaccoRed);
+      r.stroke(hx - 7, hy + 1, 15, 3, PAL.ink, 1);
+      break;
+    }
+
+    // -- Emmanuel Macron: dark navy suit + slick hair (gag, no mechanic). --
+    case 'macron': {
+      // Dark navy suit.
+      r.rect(coatX, coatY, coatW, coatH, PAL.franceBlue);
+      r.stroke(coatX, coatY, coatW, coatH, PAL.ink, 1);
+      // White shirt panel.
+      r.rect(x - 5, coatY + 1, 10, coatH - 1, PAL.offWhite);
+      // Suit lapels over the shirt.
+      r.rect(coatX + 4, coatY + 1, 10, 4, PAL.franceBlue);
+      r.rect(coatX + coatW - 14, coatY + 1, 10, 4, PAL.franceBlue);
+      r.px(x - 6, coatY + 5, PAL.ink);
+      r.px(x + 6, coatY + 5, PAL.ink);
+      // Blue tie.
+      r.rect(x - 1, coatY + 1, 3, 3, PAL.franceBlue); // knot
+      r.rect(x, coatY + 4, 2, coatH - 5, PAL.franceBlue);
+      r.vline(x, coatY + 4, coatH - 6, PAL.shadow);
+      // Slick side-combed dark hair, slightly receding at the temples.
+      r.rect(hx + 1, hy - 4, hw - 2, 6, PAL.woodDark);
+      r.rect(hx + 2, hy - 1, 4, 5, PAL.skin);
+      r.rect(hx + hw - 6, hy - 1, 4, 5, PAL.skin);
+      r.vline(hx + 6, hy - 4, 6, PAL.wood); // part line
+      for (let gx = hx + 2; gx < hx + hw - 2; gx += 3) r.px(gx, hy - 3, PAL.wood);
+      r.stroke(hx + 1, hy - 4, hw - 2, 6, PAL.ink, 1);
+      break;
+    }
+
+    // -- Cyril Hanouna: stubble + casual open collar + gold chain (gag). --
+    case 'hanouna': {
+      // Heavy stubble across the jaw and upper lip.
+      r.rect(hx + 2, hy + hh - 8, hw - 4, 6, PAL.skinShadow);
+      r.vline(hx + 2, eyeY + 4, hh - 16, PAL.skinShadow);
+      r.vline(hx + hw - 3, eyeY + 4, hh - 16, PAL.skinShadow);
+      r.hline(x - 5, my - 2, 10, PAL.skinShadow);
+      for (let by = hy + hh - 9; by < hy + hh - 1; by++) {
+        for (let bx = hx + 3; bx < hx + hw - 3; bx += 2) {
+          if (hash2(bx, by) > 0.5) r.px(bx, by, PAL.ink);
+        }
+      }
+      r.hline(x - 4, my, 8, PAL.ink); // re-stamp the mouth over the stubble
+      // Slick near-black hair.
+      r.rect(hx - 1, hy - 4, hw + 2, 6, PAL.ink);
+      r.px(hx + 6, hy - 2, PAL.woodDark);
+      r.px(hx + 16, hy - 3, PAL.woodDark);
+      // Open casual collar (no tie) + gold chain.
+      r.rect(x - 8, coatY, 6, 5, PAL.wallDark);
+      r.rect(x + 2, coatY, 6, 5, PAL.wallDark);
+      r.stroke(x - 8, coatY, 6, 5, PAL.ink, 1);
+      r.stroke(x + 2, coatY, 6, 5, PAL.ink, 1);
+      for (let cxk = x - 3; cxk <= x + 3; cxk++) r.px(cxk, coatY + 2, PAL.fdjYellow);
+      break;
+    }
+
+    default:
+      break;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -375,16 +663,108 @@ export function drawSpeechBubble(
 }
 
 // ---------------------------------------------------------------------------
+// Flag — tiny ~14x10 recognizable national flag with a 1px ink border. Drawn
+// only with PAL colors, hard pixel edges, no AA. Used on the CNI nationality
+// row. Informational flavour only — no gameplay rule attached.
+// ---------------------------------------------------------------------------
+export function drawFlag(r: Renderer, x: number, y: number, code: Country): void {
+  const W = 14;
+  const H = 10;
+  // Inner field inside the 1px ink border.
+  const ix = x + 1;
+  const iy = y + 1;
+  const iw = W - 2; // 12
+  const ih = H - 2; // 8
+
+  switch (code) {
+    // France — three vertical bands bleu / blanc / rouge.
+    case 'FR': {
+      r.rect(ix, iy, 4, ih, PAL.franceBlue);
+      r.rect(ix + 4, iy, 4, ih, PAL.offWhite);
+      r.rect(ix + 8, iy, 4, ih, PAL.fdjRed);
+      break;
+    }
+
+    // USA — red/white horizontal stripes + blue canton with white star pixels.
+    case 'US': {
+      for (let i = 0; i < ih; i++) {
+        r.hline(ix, iy + i, iw, i % 2 === 0 ? PAL.fdjRed : PAL.offWhite);
+      }
+      // Blue canton, top-left.
+      r.rect(ix, iy, 6, 4, PAL.franceBlue);
+      // A scatter of white "stars".
+      r.px(ix + 1, iy + 1, PAL.offWhite);
+      r.px(ix + 3, iy + 1, PAL.offWhite);
+      r.px(ix + 4, iy + 2, PAL.offWhite);
+      r.px(ix + 2, iy + 2, PAL.offWhite);
+      break;
+    }
+
+    // Israël — white field, blue bands top + bottom, Star-of-David hint centre.
+    case 'IL': {
+      r.rect(ix, iy, iw, ih, PAL.offWhite);
+      r.hline(ix, iy, iw, PAL.franceBlue);
+      r.hline(ix, iy + 1, iw, PAL.franceBlue);
+      r.hline(ix, iy + ih - 1, iw, PAL.franceBlue);
+      r.hline(ix, iy + ih - 2, iw, PAL.franceBlue);
+      // Hexagram hint (a small diamond cluster) in the white middle band.
+      const cx = ix + iw / 2; // 6
+      r.px(cx, iy + 2, PAL.franceBlue);
+      r.px(cx - 1, iy + 3, PAL.franceBlue);
+      r.px(cx + 1, iy + 3, PAL.franceBlue);
+      r.px(cx - 1, iy + 4, PAL.franceBlue);
+      r.px(cx + 1, iy + 4, PAL.franceBlue);
+      r.px(cx, iy + 5, PAL.franceBlue);
+      break;
+    }
+
+    // Arabie saoudite — green field with a white blade/inscription hint.
+    case 'SA': {
+      r.rect(ix, iy, iw, ih, PAL.mutedGreen);
+      // White "shahada" inscription line + a sword blade below it.
+      r.hline(ix + 2, iy + 2, iw - 4, PAL.offWhite);
+      r.hline(ix + 2, iy + 5, iw - 4, PAL.offWhite);
+      r.px(ix + 2, iy + 6, PAL.offWhite); // sword hilt tip
+      break;
+    }
+
+    // Palestine — black/white/green horizontal bands + red triangle at the hoist.
+    case 'PS': {
+      r.rect(ix, iy, iw, 3, PAL.ink); // black top band
+      r.rect(ix, iy + 3, iw, 2, PAL.offWhite); // white middle band
+      r.rect(ix, iy + 5, iw, 3, PAL.mutedGreen); // green bottom band
+      // Red triangle pointing inward from the hoist (left edge).
+      const tri = [1, 2, 3, 4, 4, 3, 2, 1];
+      for (let i = 0; i < ih; i++) r.hline(ix, iy + i, tri[i], PAL.fdjRed);
+      break;
+    }
+  }
+
+  // Hard ink border around the whole flag.
+  r.stroke(x, y, W, H, PAL.ink, 1);
+}
+
+// ---------------------------------------------------------------------------
 // CNI — French national ID card look.
 // ---------------------------------------------------------------------------
+/** Issuing-authority label shown in the ID card header band, per country. */
+const CNI_AUTHORITY: Record<Country, string> = {
+  FR: 'REPUBLIQUE FRANCAISE',
+  US: "ETATS-UNIS D'AMERIQUE",
+  IL: "ETAT D'ISRAEL",
+  SA: 'ARABIE SAOUDITE',
+  PS: 'ETAT DE PALESTINE',
+};
+
 export function drawCNI(
   r: Renderer,
   x: number,
   y: number,
-  fields: { name: string; birth: string }
+  fields: { name: string; birth: string; country?: Country }
 ): void {
-  const w = 152;
-  const h = 88;
+  const country: Country = fields.country ?? 'FR';
+  const w = 162;
+  const h = 86;
 
   // Drop shadow + cream card.
   r.rect(x + 2, y + 2, w, h, PAL.shadow);
@@ -393,19 +773,17 @@ export function drawCNI(
   // Paper sheen.
   r.hline(x + 1, y + 1, w - 2, PAL.offWhite);
 
-  // Header band (full width). 'REPUBLIQUE FRANCAISE' = 119px @ scale 1, fits.
+  // Header band (full width): issuing authority + the national flag of the
+  // client's country (so nationality reads from the top band, coherently).
   r.rect(x + 1, y + 1, w - 2, 11, PAL.tobaccoRed);
-  r.text('REPUBLIQUE FRANCAISE', x + 4, y + 3, { color: PAL.offWhite, scale: 1, align: 'left' });
-  // Tricolore tab at the far right, clear of the header text: blue / white / red.
-  r.rect(x + w - 11, y + 2, 3, 9, PAL.franceBlue);
-  r.rect(x + w - 8, y + 2, 3, 9, PAL.offWhite);
-  r.rect(x + w - 5, y + 2, 3, 9, PAL.fdjRed);
+  r.text(CNI_AUTHORITY[country], x + 4, y + 3, { color: PAL.offWhite, scale: 1, align: 'left' });
+  drawFlag(r, x + w - 17, y + 1, country);
 
   // Sub-title line.
   r.text("CARTE D'IDENTITE", x + 4, y + 16, { color: PAL.ink, scale: 1, align: 'left' });
 
   // Photo box (skin block, framed).
-  const pw = 30;
+  const pw = 26;
   const ph = 42;
   const px0 = x + 6;
   const py0 = y + 28;
@@ -415,20 +793,21 @@ export function drawCNI(
   r.rect(px0 + 9, py0 + 6, 12, 12, PAL.skinShadow);
   r.rect(px0 + 6, py0 + 20, 18, ph - 20, PAL.skinShadow);
 
-  // Label / value rows, right of the photo.
+  // NOM and NE(E) LE — both in the right column beside the photo, each a
+  // label + value + underline. NE(E) LE holds "DD/MM/YYYY (XX ans)".
   const tx = px0 + pw + 8;
   const avail = x + w - 5 - tx; // pixels available for a value before the edge
-  let ry = y + 28;
+  const underW = w - (tx - x) - 5;
   const rows: { label: string; value: string }[] = [
     { label: 'NOM', value: fields.name },
     { label: 'NE(E) LE', value: fields.birth },
   ];
+  let ry = y + 30;
   for (const row of rows) {
     r.text(row.label, tx, ry, { color: PAL.skinShadow, scale: 1, align: 'left' });
     r.text(clampToWidth(row.value, avail), tx, ry + 9, { color: PAL.ink, scale: 1, align: 'left' });
-    // Underline rule.
-    r.hline(tx, ry + 18, w - (tx - x) - 5, PAL.skinShadow);
-    ry += 26;
+    r.hline(tx, ry + 18, underW, PAL.skinShadow);
+    ry += 24;
   }
 }
 
@@ -985,4 +1364,253 @@ export function drawScoreEntry(r: Renderer, x: number, y: number, a: number, b: 
   const colonX = x + cellW + Math.floor(gap / 2);
   r.rect(colonX, y + 4, 2, 2, PAL.fdjYellow);
   r.rect(colonX, y + cellH - 6, 2, 2, PAL.fdjYellow);
+}
+
+// ---------------------------------------------------------------------------
+// Phone icon — small desk telephone for the "Appeler la police" button.
+// Handset resting on a cradle above a keypad base. `color` tints the body.
+// ---------------------------------------------------------------------------
+export function drawPhoneIcon(r: Renderer, x: number, y: number, color: string): void {
+  const w = 16;
+  const h = 14;
+
+  // --- Base unit (the lower box with the keypad) ---
+  const by = y + 6;
+  const bh = h - 6;
+  r.rect(x, by, w, bh, color);
+  r.stroke(x, by, w, bh, PAL.ink, 1);
+  // Lit top bevel + dark base shadow.
+  r.hline(x + 1, by + 1, w - 2, PAL.offWhite);
+  r.hline(x + 1, by + bh - 2, w - 2, PAL.shadow);
+  // Keypad: 3x2 grid of little dots.
+  for (let rr = 0; rr < 2; rr++) {
+    for (let c = 0; c < 3; c++) {
+      r.px(x + 4 + c * 3, by + 2 + rr * 2, PAL.ink);
+    }
+  }
+
+  // --- Handset resting across the cradle (top) ---
+  // Horizontal bar.
+  r.rect(x + 2, y, w - 4, 3, PAL.ink);
+  r.hline(x + 3, y, w - 6, PAL.skinShadow); // lit top edge of the handset
+  // Ear / mouth pieces drooping at each end.
+  r.rect(x, y, 3, 5, PAL.ink);
+  r.rect(x + w - 3, y, 3, 5, PAL.ink);
+  r.px(x + 1, y + 1, PAL.skinShadow);
+  r.px(x + w - 2, y + 1, PAL.skinShadow);
+  // Gap below the handset reads as the cradle recess.
+  r.hline(x + 1, y + 5, w - 2, PAL.shadow);
+}
+
+// ---------------------------------------------------------------------------
+// Plea bubble — like the speech bubble but visibly agitated: jittery motion
+// ticks around the outline and sweat drops, for an insisting / pleading client.
+// Word-wraps the FRENCH text inside.
+// ---------------------------------------------------------------------------
+export function drawPleaBubble(
+  r: Renderer,
+  x: number,
+  y: number,
+  w: number,
+  text: string
+): void {
+  const padX = 6;
+  const padY = 6;
+  const lineH = 9;
+  const innerW = w - padX * 2;
+
+  // Word-wrap against the bitmap font advance (same approach as the bubble).
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let cur = '';
+  for (const word of words) {
+    const test = cur ? cur + ' ' + word : word;
+    if (r.measure(test, 1) <= innerW || cur === '') {
+      cur = test;
+    } else {
+      lines.push(cur);
+      cur = word;
+    }
+  }
+  if (cur) lines.push(cur);
+  if (lines.length === 0) lines.push('');
+
+  const h = padY * 2 + lines.length * lineH;
+
+  // Drop shadow.
+  r.rect(x + 2, y + 2, w, h, PAL.shadow);
+
+  // Bubble body (cream) with knocked-out corners to fake rounding.
+  r.rect(x, y, w, h, PAL.paper);
+  r.px(x, y, PAL.bg);
+  r.px(x + w - 1, y, PAL.bg);
+  r.px(x, y + h - 1, PAL.bg);
+  r.px(x + w - 1, y + h - 1, PAL.bg);
+
+  // Ink frame + top highlight.
+  r.stroke(x, y, w, h, PAL.ink, 1);
+  r.hline(x + 2, y + 1, w - 4, PAL.offWhite);
+
+  // --- Agitation: short "vibration" motion ticks radiating off the outline ---
+  // Sides.
+  r.hline(x - 3, y + 4, 2, PAL.ink);
+  r.hline(x - 3, y + h - 6, 2, PAL.ink);
+  r.hline(x + w + 1, y + 6, 2, PAL.ink);
+  r.hline(x + w + 1, y + h - 8, 2, PAL.ink);
+  // Top.
+  r.vline(x + 5, y - 3, 2, PAL.ink);
+  r.vline(x + w - 6, y - 3, 2, PAL.ink);
+
+  // --- Sweat drops (blue teardrops with a glint) near the upper-right ---
+  const drop = (dx: number, dy: number): void => {
+    r.px(dx, dy, PAL.franceBlue);
+    r.rect(dx - 1, dy + 1, 3, 2, PAL.franceBlue);
+    r.px(dx, dy + 1, PAL.offWhite); // glint
+  };
+  drop(x + w + 3, y + 1);
+  drop(x + w - 2, y - 5);
+
+  // Tail pointing down-left toward the client.
+  const tx = x + 12;
+  const ty = y + h;
+  r.rect(tx, ty, 6, 1, PAL.paper);
+  r.rect(tx + 1, ty + 1, 4, 1, PAL.paper);
+  r.rect(tx + 2, ty + 2, 2, 1, PAL.paper);
+  r.px(tx, ty, PAL.ink);
+  r.px(tx + 5, ty, PAL.ink);
+  r.px(tx + 1, ty + 1, PAL.ink);
+  r.px(tx + 4, ty + 1, PAL.ink);
+  r.px(tx + 2, ty + 3, PAL.ink);
+  r.px(tx + 3, ty + 3, PAL.ink);
+
+  // Text.
+  let ty2 = y + padY;
+  for (const line of lines) {
+    r.text(line, x + padX, ty2, { color: PAL.ink, scale: 1, align: 'left' });
+    ty2 += lineH;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Police flash — a roof gyrophare beacon. Constant blue (left) / red (right)
+// dome, with a bright flashing core + radiating beams driven by phase `t`.
+// `t` is a free-running time/phase value (e.g. seconds).
+// ---------------------------------------------------------------------------
+export function drawPoliceFlash(r: Renderer, x: number, y: number, t: number): void {
+  const w = 14;
+  const domeH = 8;
+  const cx = x + w / 2;
+
+  // Dome silhouette rows (narrow top -> wide bottom), split blue | red.
+  const spans = [4, 8, 10, 12, 14, 14, 14, 14];
+  for (let i = 0; i < spans.length; i++) {
+    const len = spans[i];
+    const ox = Math.round(x + (w - len) / 2);
+    const ry = y + i;
+    const half = Math.ceil(len / 2);
+    r.hline(ox, ry, half, PAL.franceBlue);
+    r.hline(ox + half, ry, len - half, PAL.fdjRed);
+  }
+  // Edge ink + base seam.
+  r.vline(x, y + 4, domeH - 4, PAL.ink);
+  r.vline(x + w - 1, y + 4, domeH - 4, PAL.ink);
+  r.hline(x, y + domeH - 1, w, PAL.ink);
+
+  // Base mount (black housing on the roof).
+  r.rect(x + 1, y + domeH, w - 2, 3, PAL.woodDark);
+  r.stroke(x + 1, y + domeH, w - 2, 3, PAL.ink, 1);
+
+  // Flashing core: phase toggles which half throws light.
+  const phase = Math.floor(t * 3) % 2;
+  const lit = phase === 0 ? PAL.franceBlue : PAL.fdjRed;
+  const coreX = phase === 0 ? x + 3 : x + w - 4;
+  // Bright core glint.
+  r.px(coreX, y + 2, PAL.offWhite);
+  r.px(coreX, y + 3, PAL.offWhite);
+
+  // Radiating side beams (dashed, flickering with t) in the lit color.
+  const rayY = y + 3;
+  for (let d = 3; d <= 8; d++) {
+    if ((d + Math.floor(t * 6)) % 2 === 0) {
+      r.px(coreX - d, rayY - 1, lit);
+      r.px(coreX + d, rayY - 1, lit);
+      r.px(coreX - d, rayY + 2, lit);
+      r.px(coreX + d, rayY + 2, lit);
+    }
+  }
+
+  // Upward halo flicker above the dome (both colors, jittered by phase).
+  if (phase === 0) {
+    r.px(cx - 2, y - 3, PAL.franceBlue);
+    r.px(cx + 2, y - 2, PAL.fdjRed);
+  } else {
+    r.px(cx - 2, y - 2, PAL.franceBlue);
+    r.px(cx + 2, y - 3, PAL.fdjRed);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cop — a small pixel gendarme bust (navy uniform, peaked képi) that can
+// appear at the window when the police arrive. `x` is the horizontal center,
+// `y` the top of the képi (mirrors drawClient's framing).
+// ---------------------------------------------------------------------------
+export function drawCop(r: Renderer, x: number, y: number): void {
+  const headW = 24;
+  const headH = 26;
+  const hx = x - headW / 2;
+  const hy = y + 8; // head sits below the cap
+
+  // --- Shoulders / uniform (navy) ---
+  const coatW = 50;
+  const coatH = 22;
+  const coatX = x - coatW / 2;
+  const coatY = hy + headH - 2;
+  r.rect(coatX, coatY, coatW, coatH, PAL.franceBlue);
+  r.stroke(coatX, coatY, coatW, coatH, PAL.ink, 1);
+  // Collar highlight + gold shoulder braids (epaulettes).
+  r.hline(coatX + 2, coatY + 1, coatW - 4, PAL.offWhite);
+  r.rect(coatX + 3, coatY + 2, 8, 2, PAL.fdjYellow);
+  r.rect(coatX + coatW - 11, coatY + 2, 8, 2, PAL.fdjYellow);
+  // Shirt / tie V down the middle.
+  r.rect(x - 2, coatY + 1, 4, coatH - 1, PAL.offWhite);
+  r.vline(x, coatY + 2, coatH - 3, PAL.ink);
+
+  // --- Neck ---
+  r.rect(x - 4, hy + headH - 4, 8, 6, PAL.skinShadow);
+
+  // --- Head ---
+  r.rect(hx, hy, headW, headH, PAL.skin);
+  r.stroke(hx, hy, headW, headH, PAL.skinShadow, 1);
+  r.vline(hx + headW - 2, hy + 5, headH - 8, PAL.skinShadow); // jaw shadow
+
+  // --- Eyes (stern) ---
+  const eyeY = hy + 10;
+  r.rect(hx + 5, eyeY, 4, 3, PAL.offWhite);
+  r.rect(hx + headW - 9, eyeY, 4, 3, PAL.offWhite);
+  r.px(hx + 6, eyeY + 1, PAL.ink);
+  r.px(hx + headW - 8, eyeY + 1, PAL.ink);
+  r.hline(hx + 5, eyeY - 2, 4, PAL.ink); // brows
+  r.hline(hx + headW - 9, eyeY - 2, 4, PAL.ink);
+
+  // --- Nose + flat mouth ---
+  r.vline(x, eyeY + 3, 3, PAL.skinShadow);
+  r.hline(x - 3, hy + headH - 6, 6, PAL.ink);
+
+  // --- Képi (peaked cap) drawn over the top of the head ---
+  const capH = 9;
+  const capY = y;
+  // Navy crown (flat top).
+  r.rect(hx - 1, capY, headW + 2, capH, PAL.franceBlue);
+  // Red band along the bottom of the crown.
+  r.rect(hx - 1, capY + capH - 3, headW + 2, 3, PAL.fdjRed);
+  // Black visor jutting forward over the brow.
+  r.rect(hx - 3, capY + capH, headW + 6, 2, PAL.ink);
+  r.hline(hx - 3, capY + capH + 1, headW + 6, PAL.shadow);
+  // Front emblem / cockade in gold, centered.
+  r.rect(x - 1, capY + 2, 2, 3, PAL.fdjYellow);
+  r.px(x, capY + capH - 2, PAL.fdjYellow);
+  // Crown sheen + outline.
+  r.px(hx + 1, capY + 1, PAL.offWhite);
+  r.px(hx + 2, capY + 1, PAL.offWhite);
+  r.stroke(hx - 1, capY, headW + 2, capH, PAL.ink, 1);
 }

@@ -1,9 +1,10 @@
 // Economy: daily takings, weekly reckoning (rent + supplier), week-end check.
 
-import type { GameState, MatchInfo, BetTicket, BetPick } from './types';
+import type { GameState, MatchInfo, BetTicket, BetPick, Client } from './types';
 import { RENT, SUPPLIER_ORDER, TOTAL_DAYS } from './types';
 import { DAYS_PER_WEEK } from './content/days';
 import { outcomeFromScore } from './content/matches';
+import { REPUTATION_START } from './consequence';
 
 /** Round a euro amount to cents to avoid float drift. */
 function roundCents(amount: number): number {
@@ -13,6 +14,18 @@ function roundCents(amount: number): number {
 /** Add a sale amount to the day's takings. */
 export function cashIn(state: GameState, amount: number): void {
   state.dayRevenue = roundCents(state.dayRevenue + amount);
+}
+
+/**
+ * Satirical "snitch reward": some special clients carry a `policeBonus` that pays
+ * a flat cash bonus when the player calls the police on them, INSTEAD of the
+ * normal reputation outcome (applyPoliceCall). Returns the bonus (0 if none).
+ * The counter scene should: if policeBonusFor(client) > 0, take the bonus path
+ * (consequence.applyPoliceBonus / cashIn) and SKIP the normal applyPoliceCall;
+ * otherwise fall back to the usual reputation-based police outcome.
+ */
+export function policeBonusFor(client: Client): number {
+  return client.policeBonus && client.policeBonus > 0 ? client.policeBonus : 0;
 }
 
 /**
@@ -74,6 +87,10 @@ export function chooseEnding(state: GameState): Ending {
   const name = state.playerName && state.playerName.trim().length > 0 ? state.playerName : 'Gérant';
   const faults = state.totalFaults ?? 0;
   const story = state.story ?? {};
+  // Reputation (0..100). Tolerate older saves that predate the field: default to
+  // the canonical start value (kept in sync with consequence.ts).
+  const reputation =
+    typeof state.reputation === 'number' ? state.reputation : REPUTATION_START;
 
   // Bankruptcy: the shop has gone under. Highest-priority outcome.
   if (state.cash <= 0) {
@@ -87,11 +104,24 @@ export function chooseEnding(state: GameState): Ending {
     };
   }
 
-  // License revoked: too many faults, or a flagged serious offence.
-  // (Serving the banned gambler, enabling FDJ fraud, or selling to the minor.)
+  // License revoked: too many faults, a flagged serious offence, OR a reputation
+  // in tatters. A débitant who turned the neighbourhood against them — typically by
+  // abusing the police on harmless people — loses the licence even with a full till.
   const seriousOffence =
     story.enabledFraud === true || story.enabledGambler === true || story.soldToMinor === true;
-  if (faults >= 8 || (faults >= 5 && seriousOffence)) {
+  const ruinedReputation = reputation < 20;
+  // Calling the police on a harmless insister is an abuse of power the neighbourhood
+  // does not forgive. A single flagged abuse (a −18 rep hit alone never drops 50
+  // below the ruined threshold) can still cost the licence — and turning the cops on
+  // the desperate gambler is the cruellest, dark-epilogue case.
+  const abusedPower = story.abusedPower === true;
+  const calledCopsOnGambler = story.calledCopsOnGambler === true;
+  if (
+    faults >= 8 ||
+    (faults >= 5 && seriousOffence) ||
+    ruinedReputation ||
+    abusedPower
+  ) {
     return {
       id: 'licence',
       title: 'LICENCE RETIRÉE',
@@ -101,13 +131,30 @@ export function chooseEnding(state: GameState): Ending {
         (seriousOffence
           ? 'Servir un interdit de jeu et fermer les yeux sur la fraude ne pardonnent pas. '
           : '') +
+        (calledCopsOnGambler
+          ? 'Avoir lâché la police sur un joueur à bout, qui suppliait qu\'on l\'aide, vous ' +
+            'poursuivra longtemps : le quartier vous a vu faire, et ne l\'oubliera pas. '
+          : abusedPower
+            ? 'Appeler la police sur des clients inoffensifs, pour un caprice de comptoir : ' +
+              'le quartier a vu l\'abus, et la confiance est rompue. '
+            : '') +
+        (ruinedReputation && !abusedPower
+          ? 'Et le quartier ne veut plus de vous : trop de scandales, trop d\'abus. '
+          : '') +
         'Le commerce survivra, mais sans vous derrière la caisse.',
     };
   }
 
   // Clean tenure: solvent, very few faults (the single grace warning is tolerated),
-  // no serious offence, inspection survived.
-  if (faults <= 2 && !seriousOffence && story.passedInspection !== false) {
+  // no serious offence, inspection survived, and a reputation that is at least intact.
+  // A strong reputation also rescues an otherwise borderline run (a few faults).
+  const goodReputation = reputation >= 60;
+  if (
+    !seriousOffence &&
+    story.passedInspection !== false &&
+    reputation >= 40 &&
+    (faults <= 2 || (goodReputation && faults <= 4))
+  ) {
     return {
       id: 'titularise',
       title: 'TITULARISÉ',

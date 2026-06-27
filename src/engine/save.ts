@@ -80,6 +80,12 @@ function normalize(parsed: unknown): GameState | null {
     sellerLook:
       typeof o.sellerLook === 'object' && o.sellerLook !== null ? (o.sellerLook as ClientLook) : {},
     totalFaults: typeof o.totalFaults === 'number' ? o.totalFaults : 0,
+    // Reputation is optional: older saves predate it. When present carry it
+    // through CLAMPED into the legal 0..100 band (a tampered/corrupt save must not
+    // bypass the invariant that economy.ts reads before any mutation re-clamps it);
+    // when absent consumers treat the missing field as the 50 default.
+    reputation:
+      typeof o.reputation === 'number' ? Math.max(0, Math.min(100, o.reputation)) : undefined,
     story:
       typeof o.story === 'object' && o.story !== null
         ? (o.story as Record<string, boolean>)

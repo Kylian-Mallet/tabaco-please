@@ -85,6 +85,23 @@ const FONT: Record<string, string[]> = {
   ' ': ['.....', '.....', '.....', '.....', '.....', '.....', '.....'],
 };
 
+/**
+ * Normalize text so typographic punctuation maps to the bitmap font's glyphs.
+ * Without this, curly apostrophes/quotes, ellipses and guillemets (which the
+ * French copy uses) have no glyph and render as blank gaps. NFC also precomposes
+ * any decomposed accents so the ACCENTED lookup matches.
+ */
+function sanitize(s: string): string {
+  return s
+    .normalize('NFC')
+    .replace(/[‘’]/g, "'") // ‘ ’ -> '
+    .replace(/[“”]/g, '"') // “ ” -> "
+    .replace(/…/g, '...') // … -> ...
+    .replace(/[«»]/g, '"') // « » -> "
+    .replace(/[–—]/g, '-') // – — -> -
+    .replace(/ /g, ' '); // nbsp -> space
+}
+
 // Accent overlay marks drawn ABOVE the glyph (2 rows, at y-2..y-1).
 type Accent = 'acute' | 'grave' | 'circ' | 'cedilla' | 'trema';
 const ACCENT_TOP: Record<Exclude<Accent, 'cedilla'>, string[]> = {
@@ -186,6 +203,7 @@ export class Renderer {
     const scale = opts?.scale ?? (opts?.size ? Math.max(1, Math.round(opts.size / GH)) : 1);
     const align = opts?.align ?? 'left';
 
+    s = sanitize(s);
     const widthPx = this.measure(s, scale);
     let startX = Math.round(x);
     if (align === 'center') startX = Math.round(x - widthPx / 2);
@@ -218,9 +236,10 @@ export class Renderer {
 
   /** Pixel width of `s` rendered by the bitmap font at `scale`. */
   measure(s: string, scale: number = 1): number {
-    if (s.length === 0) return 0;
+    const t = sanitize(s);
+    if (t.length === 0) return 0;
     // Each char advances ADV; drop the trailing inter-glyph gap.
-    return (s.length * ADV - 1) * scale;
+    return (t.length * ADV - 1) * scale;
   }
 
   // -- Low-level pixel helpers (used by sprites.ts) -------------------------

@@ -14,6 +14,7 @@ import type { GameContext } from '../game/types';
 import { save } from './save';
 import * as radio from './radio';
 import { getSfxVolume, setSfxVolume, playSfx } from './sfx';
+import { mathHelpEnabled, toggleMathHelp } from './options';
 
 /** One labelled volume slider (0..1). Click anywhere on its track to set it. */
 interface Slider {
@@ -38,6 +39,8 @@ export class SettingsMenu {
   private readonly homeBtn: Button;
   private readonly radioSlider: Slider;
   private readonly sfxSlider: Slider;
+  /** "J'aime pas les maths" checkbox (change-due hint). */
+  private readonly mathBox: Rect;
 
   constructor(ctx: GameContext, opts: { goHome: () => void }) {
     this.ctx = ctx;
@@ -68,6 +71,9 @@ export class SettingsMenu {
       get: () => getSfxVolume(),
       set: (v) => setSfxVolume(v),
     };
+
+    // Comfort toggle between the sliders and the action buttons.
+    this.mathBox = { x: contentX, y: y + 74, w: 10, h: 10 };
 
     this.saveBtn = new Button(
       { x: contentX, y: y + 96, w: contentW, h: 16 },
@@ -120,6 +126,14 @@ export class SettingsMenu {
     if (this.handleSlider(p, this.radioSlider)) return true;
     if (this.handleSlider(p, this.sfxSlider)) return true;
 
+    // Checkbox: generous hit area covering the box + its label.
+    const mathHit: Rect = { x: this.mathBox.x - 2, y: this.mathBox.y - 2, w: this.panelRect.w - 12, h: this.mathBox.h + 4 };
+    if (inRect(p, mathHit)) {
+      toggleMathHelp();
+      playSfx('click');
+      return true;
+    }
+
     if (this.saveBtn.hit(p)) {
       this.saveBtn.click();
       return true;
@@ -171,6 +185,7 @@ export class SettingsMenu {
 
     this.drawSlider(r, this.radioSlider);
     this.drawSlider(r, this.sfxSlider);
+    this.drawMathToggle(r);
 
     this.saveBtn.draw(r);
     this.homeBtn.draw(r);
@@ -193,6 +208,28 @@ export class SettingsMenu {
       r.px(b.x + 3 + i, b.y + 3 + i, PAL.offWhite);
       r.px(b.x + 7 - i, b.y + 3 + i, PAL.offWhite);
     }
+  }
+
+  /** The "J'aime pas les maths" checkbox + label. */
+  private drawMathToggle(r: Renderer): void {
+    const b = this.mathBox;
+    const on = mathHelpEnabled();
+    r.rect(b.x, b.y, b.w, b.h, on ? PAL.mutedGreen : PAL.shadow);
+    r.stroke(b.x, b.y, b.w, b.h, PAL.ink, 1);
+    if (on) {
+      // Check mark.
+      r.px(b.x + 2, b.y + 5, PAL.offWhite);
+      r.px(b.x + 3, b.y + 6, PAL.offWhite);
+      r.px(b.x + 4, b.y + 7, PAL.offWhite);
+      r.px(b.x + 5, b.y + 5, PAL.offWhite);
+      r.px(b.x + 6, b.y + 3, PAL.offWhite);
+      r.px(b.x + 7, b.y + 2, PAL.offWhite);
+    }
+    r.text("J'aime pas les maths", b.x + b.w + 5, b.y + 2, {
+      color: PAL.paper,
+      scale: 1,
+      align: 'left',
+    });
   }
 
   private drawSlider(r: Renderer, s: Slider): void {

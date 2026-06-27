@@ -10,9 +10,8 @@ export interface Station {
   url: string | null;
 }
 
-/** Curated French stations. Silence first so "do not play" is the default. */
+/** Curated French stations. The pause button covers "do not play" (no Silence entry). */
 export const STATIONS: Station[] = [
-  { name: 'Silence', url: null },
   { name: 'NRJ', url: 'https://streaming.nrjaudio.fm/oumvmk8fnozc?origine=mytuner' },
   { name: 'France Inter', url: 'https://icecast.radiofrance.fr/franceinter-midfi.mp3' },
   { name: 'FIP', url: 'https://icecast.radiofrance.fr/fip-midfi.mp3' },
@@ -29,12 +28,28 @@ interface RadioState {
   volume: number;
 }
 
-// Module-level singleton state (defaults: Silence, paused, volume 0.6).
+// Module-level singleton state (defaults: paused, volume 0.6, not muted).
 let audio: HTMLAudioElement | null = null;
 let index = 0;
 let playing = false;
 let volume = 0.6;
+let muted = false;
 let initialized = false;
+
+/** Global mute (shared with the SFX mute button): silences the radio output. */
+export function setMuted(m: boolean): void {
+  muted = m;
+  try {
+    if (audio) audio.muted = m;
+  } catch {
+    // ignore
+  }
+}
+
+/** Whether the radio is currently muted. */
+export function isMuted(): boolean {
+  return muted;
+}
 
 /** Clamp a number into the 0..1 range. */
 function clamp01(v: number): number {
@@ -89,6 +104,7 @@ export function initRadio(): void {
     // Visually hidden, but still attached so playback works.
     audio.style.display = 'none';
     audio.volume = volume;
+    audio.muted = muted;
     document.body.appendChild(audio);
   } catch {
     audio = null;
@@ -134,6 +150,7 @@ export function play(): void {
   try {
     if (audio && ensureSrc()) {
       audio.volume = volume;
+      audio.muted = muted;
       // play() may reject (autoplay policy); ignore the rejection.
       const p = audio.play() as Promise<void> | undefined;
       if (p && typeof p.catch === 'function') p.catch(() => undefined);
@@ -142,6 +159,21 @@ export function play(): void {
     // ignore playback errors
   }
   persist();
+}
+
+/**
+ * Pause the audio element WITHOUT clearing the "playing" intent, so that
+ * re-entering the counter resumes it. Used when leaving the counter scene:
+ * the radio only sounds while at the counter.
+ */
+export function suspendPlayback(): void {
+  if (!initialized) return;
+  try {
+    if (audio) audio.pause();
+  } catch {
+    // ignore
+  }
+  // Deliberately keep `playing` + persisted state untouched.
 }
 
 /** Pause playback; persists playing=false. */

@@ -56,8 +56,9 @@ export const PRODUCTS: Product[] = [
   { id: 'union-magazine', name: 'Union', category: 'presse', group: 'presse', price: 5.5, minAge: 18, color: '#473720' },
 
   // --- Vape / e-cigarette (18+) — 'vape' group, unlocks later ---
-  { id: 'puff-mangue', name: 'Puff Mangue', category: 'vape', group: 'vape', price: 8.9, minAge: 18, color: '#c9a23b' },
-  { id: 'puff-menthe', name: 'Puff Menthe Glaciale', category: 'vape', group: 'vape', price: 8.9, minAge: 18, color: '#5f7348' },
+  { id: 'puff-mangue', name: 'Puff Mangue 9K', category: 'vape', group: 'vape', price: 8.9, minAge: 18, color: '#c9a23b' },
+  { id: 'puff-fatia', name: 'Puff Fatia 100K', category: 'vape', group: 'vape', price: 8.9, minAge: 18, color: '#c9a23b' },
+  { id: 'puff-menthe', name: 'Puff Blue Razz Cherry', category: 'vape', group: 'vape', price: 8.9, minAge: 18, color: '#5f7348' },
   { id: 'kit-vape', name: 'Kit Vape', category: 'vape', group: 'vape', price: 29.9, minAge: 18, color: '#34507e' },
   { id: 'e-liquide', name: 'E-liquide', category: 'vape', group: 'vape', price: 5.9, minAge: 18, color: '#b1322f' },
 ];
@@ -69,10 +70,10 @@ export const PRODUCTS: Product[] = [
  * carry the 'base' group.
  */
 export const FAKE_PRODUCTS: Product[] = [
-  { id: 'virgam-sacre', name: 'Virgam Sacré', category: 'epicerie', group: 'base', price: 6.66, minAge: 0, fake: true, color: '#c9a23b' },
-  { id: 'clopes-cbd', name: 'Clopes au CBD "Détente"', category: 'tabac', group: 'base', price: 9.0, minAge: 18, fake: true, color: '#5f7348' },
-  { id: 'puff-9000', name: 'Puff Fatia 9K', category: 'tabac', group: 'base', price: 12.0, minAge: 18, inStock: false, color: '#b1322f' },
-  { id: 'ticket-ovni', name: "Ticket OVNI d'Aussonne", category: 'jeux', group: 'base', price: 5.0, minAge: 18, fake: true, color: '#34507e' },
+  { id: 'virgam-sacre', name: 'Virgam Sacré', category: 'epicerie', group: 'base', price: 50.00, minAge: 0, fake: true, color: '#e356c8' },
+  { id: 'vaginette-temu', name: 'Vaginette Temu', category: 'epicerie', group: 'base', price: 9.0, minAge: 18, fake: true, color: '#687348' },
+  { id: 'ticket-couilles', name: "Ticket Couilles", category: 'jeux', group: 'base', price: 5.0, minAge: 18, fake: true, color: '#34507e' },
+  { id: 'mega-dildo', name: "MEGA Dildo 55cm", category: 'epicerie', group: 'base', price: 55.0, minAge: 18, fake: true, color: '#c551e8' },
 ];
 
 // Change is made with coins down to 0.10 €, so every REAL price must be a

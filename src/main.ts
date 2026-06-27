@@ -5,6 +5,7 @@
 
 import type { GameState, GameContext } from './game/types';
 import { STARTING_CASH } from './game/types';
+import { REPUTATION_START } from './game/consequence';
 import { PAL } from './engine/palette';
 import { Renderer, VW, VH } from './engine/renderer';
 import { Input } from './engine/input';
@@ -13,7 +14,7 @@ import { load } from './engine/save';
 import { TitleScene } from './scenes/title';
 import { ControlsOverlay } from './engine/controls';
 import { SettingsMenu } from './engine/settingsMenu';
-import { initRadio, resumeRadio } from './engine/radio';
+import { initRadio } from './engine/radio';
 import { initSfx, resumeSfx } from './engine/sfx';
 import { updateFx, fxShake, fxFlash, drawFxWorld } from './engine/fx';
 import { unlockedGroupsForDay } from './game/content/days';
@@ -31,6 +32,7 @@ export function freshState(): GameState {
     playerName: '',
     sellerLook: { skin: PAL.skin, hair: PAL.woodDark, coat: PAL.franceBlue, hat: 'none', beard: false },
     totalFaults: 0,
+    reputation: REPUTATION_START,
     story: {},
     unseenFaults: [],
     unlockedGroups: ['base'],
@@ -140,7 +142,7 @@ function boot(): void {
     if (audioArmed) return;
     audioArmed = true;
     resumeSfx();
-    resumeRadio();
+    // The radio is resumed by the CounterScene (it only sounds at the counter).
   }
 
   // Forward clicks: arm audio, let the controls bar consume first, else the scene.
@@ -149,6 +151,15 @@ function boot(): void {
     if (settings.onClick(p)) return;
     if (controls.onClick(p)) return;
     sm.onClick(p);
+  });
+
+  // ESC toggles the settings menu.
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      armAudio();
+      settings.toggle();
+      e.preventDefault();
+    }
   });
 
   // Initial scene.

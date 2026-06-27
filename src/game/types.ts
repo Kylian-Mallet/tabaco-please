@@ -7,6 +7,24 @@ import type { StateMachine, Scene } from '../engine/stateMachine';
 export type Category = 'tabac' | 'alcool' | 'epicerie' | 'jeux' | 'cbd' | 'presse' | 'vape';
 
 /**
+ * Nationality shown on a client's CNI (ID card). Purely INFORMATIONAL flavour for
+ * now — no legality rule depends on it. Absent on a Client => treat as 'FR'.
+ */
+export type Country = 'FR' | 'US' | 'IL' | 'SA' | 'PS';
+
+/** Ordered list of supported countries (France first as the default). */
+export const COUNTRIES: readonly Country[] = ['FR', 'US', 'IL', 'SA', 'PS'];
+
+/** FRENCH display labels for each country, shown on the CNI nationality row. */
+export const COUNTRY_LABELS: Record<Country, string> = {
+  FR: 'France',
+  US: 'États-Unis',
+  IL: 'Israël',
+  SA: 'Arabie saoudite',
+  PS: 'Palestine',
+};
+
+/**
  * Unlock group a product belongs to. Clients only ever request products whose
  * group is currently unlocked. 'base' is always available; the others unlock at
  * later week boundaries (see content/days.ts).
@@ -50,6 +68,11 @@ export interface Client {
   /** True if this client appears on the "fichier des interdits" (banned list). */
   onBanList: boolean;
   fullName: string;
+  /**
+   * Nationality shown on the CNI (label + pixel flag). INFORMATIONAL only — no
+   * legality rule reads it. Absent => treated as 'FR'.
+   */
+  country?: Country;
   /** Patience 0..100; drains while waiting. */
   patience: number;
   /** Optional appearance overrides for visual variety. */
@@ -65,6 +88,39 @@ export interface Client {
   ticket?: BetTicket;
   /** True if this client will try to scam (leave before paying / claim a loss). */
   fraudster?: boolean;
+  /**
+   * True if REFUSING this client triggers an insisting standoff instead of them
+   * simply leaving: they hold their ground, plead, and cause a public "esclandre".
+   */
+  insists?: boolean;
+  /** FRENCH line shown while insisting (e.g. « Allez, juste un ticket… »). */
+  plea?: string;
+  /**
+   * Whether calling the police on this insister is JUSTIFIED.
+   *   true  — aggressive fraudster / threatening banned person: a fair call.
+   *   false / undefined — a sympathetic insister: calling the cops is an ABUSE
+   *   of power (dents reputation, dark narrative flag).
+   */
+  policeWorthy?: boolean;
+  /**
+   * SATIRE caricature id (real-name public-figure parody, e.g. 'ben-laden').
+   * When set, drives the caricature look/accessory in sprites and lets the scenes
+   * recognize the special client (see content/characters.ts satireCharacterFor).
+   * Absent on ordinary generated clients.
+   */
+  satireId?: string;
+  /**
+   * True if this client REFUSES TO LEAVE even once the sale is concluded: the
+   * insisting standoff also opens AFTER a successful sale (not only on a refusal).
+   * Read by the counter scene (Ben Laden's gag).
+   */
+  insistsAfterSale?: boolean;
+  /**
+   * Satirical "snitch reward": when set (> 0), calling the police on this client
+   * pays this flat CASH bonus to the day's takings INSTEAD of the normal
+   * reputation outcome (see economy.policeBonusFor / consequence.applyPoliceBonus).
+   */
+  policeBonus?: number;
 }
 
 /**
@@ -123,6 +179,16 @@ export interface GameState {
   sellerLook: ClientLook;
   /** Cumulative count of real faults over the whole run (drives the endings). */
   totalFaults: number;
+  /**
+   * Public standing with the neighbourhood / authorities, 0..100 (starts at 50).
+   * A justified police call raises it; abusing the police or caving to an
+   * insister's illegal demand lowers it. Feeds chooseEnding.
+   *
+   * The fresh-state factory initializes it to 50; consumers must tolerate its
+   * ABSENCE on older saves (treat missing as 50). Hence optional here so that
+   * pre-reputation saves and literals stay valid — at runtime it is always set.
+   */
+  reputation?: number;
   /**
    * Narrative flags set by scripted beats / recurring-character choices
    * (e.g. protectedGambler, enabledGambler, enabledFraud, passedInspection).
