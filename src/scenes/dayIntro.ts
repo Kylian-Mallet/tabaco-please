@@ -4,13 +4,14 @@ import type { Renderer } from '../engine/renderer';
 import { Button, Panel } from '../engine/ui';
 import { PAL } from '../engine/palette';
 import { VW, VH } from '../engine/layout';
-import { drawPresentoir } from '../engine/sprites';
-import { configJour } from '../game/content/jours';
+import { drawShelf } from '../engine/sprites';
+import { Tween, Ease } from '../engine/tween';
+import { dayConfig } from '../game/content/days';
 import { CounterScene } from './counter';
 
 /**
  * DayIntroScene — daily briefing.
- * Shows the JourConfig for the current day: a rule card with the newly unlocked
+ * Shows the DayConfig for the current day: a rule card with the newly unlocked
  * rule's description (if any) plus the day's intro text. The "Ouvrir le comptoir"
  * button activates the new rule (idempotent) and moves to CounterScene.
  */
@@ -18,35 +19,43 @@ export class DayIntroScene implements Scene {
   private readonly ctx: GameContext;
   private readonly config = { panel: { x: 80, y: 40, w: 320, h: 180 } };
   private readonly panel: Panel;
-  private readonly bouton: Button;
-  /** Ambient mur-de-paquets behind the briefing card. */
+  private readonly button: Button;
+  /** Ambient pack wall behind the briefing card. */
   private readonly packs: { x: number; y: number; color: string }[] = [];
+
+  // Slide-in animation: the whole briefing block drops from above the screen
+  // (easeOutBack overshoot), and the NOUVELLE RÈGLE card pops a touch after.
+  private slideY = 0;
+  private cardOffset = 0;
+  private ready = false;
+  private readonly slideTween: Tween;
+  private readonly cardTween: Tween;
 
   constructor(ctx: GameContext) {
     this.ctx = ctx;
-    const cfg = configJour(ctx.state.jour);
+    const cfg = dayConfig(ctx.state.day);
     const p = this.config.panel;
     this.panel = new Panel(
       { x: p.x, y: p.y, w: p.w, h: p.h },
-      { title: `Jour ${cfg.jour}`, color: PAL.paper }
+      { title: `Jour ${cfg.day}`, color: PAL.paper }
     );
-    this.bouton = new Button(
+    this.button = new Button(
       { x: p.x + p.w / 2 - 70, y: p.y + p.h - 28, w: 140, h: 20 },
       'Ouvrir le comptoir',
-      () => this.ouvrir(),
-      { color: PAL.vertMuted }
+      () => this.openCounter(),
+      { color: PAL.mutedGreen }
     );
 
-    // Build a dim mur-de-paquets for ambiance behind the card.
+    // Build a dim pack wall for ambiance behind the card.
     const packColors = [
-      PAL.rougeTabac,
-      PAL.vertMuted,
-      PAL.fdjRouge,
+      PAL.tobaccoRed,
+      PAL.mutedGreen,
+      PAL.fdjRed,
       PAL.wood,
       PAL.woodDark,
-      PAL.fdjJaune,
+      PAL.fdjYellow,
       PAL.wallDark,
-      PAL.peauOmbre,
+      PAL.skinShadow,
     ];
     const shelfYs = [28, 56, 84, 112, 140];
     let i = 0;
@@ -56,26 +65,66 @@ export class DayIntroScene implements Scene {
         i++;
       }
     }
+
+    // Briefing card drops from fully above the screen down to its resting spot.
+    this.slideY = -(p.y + p.h);
+    this.slideTween = new Tween({
+      from: -(p.y + p.h),
+      to: 0,
+      duration: 0.45,
+      easing: Ease.easeOutBack,
+      snap: true,
+      onUpdate: (v) => {
+        this.slideY = v;
+      },
+    });
+    // The rule card pops in slightly once the card has nearly landed.
+    this.cardOffset = -9;
+    this.cardTween = new Tween({
+      from: -9,
+      to: 0,
+      duration: 0.35,
+      delay: 0.3,
+      easing: Ease.easeOutBack,
+      snap: true,
+      onUpdate: (v) => {
+        this.cardOffset = v;
+      },
+      // Enable clicks only once the LATER-finishing card pop has settled, so a
+      // fast click can't open the counter while the rule card is still popping.
+      onComplete: () => {
+        this.ready = true;
+      },
+    });
   }
 
-  private ouvrir(): void {
-    const cfg = configJour(this.ctx.state.jour);
-    const regle = cfg.nouvelleRegle;
-    if (regle && !this.ctx.state.reglesActives.some((r) => r.id === regle.id)) {
-      this.ctx.state.reglesActives.push(regle);
+  update(dt: number): void {
+    this.slideTween.update(dt);
+    this.cardTween.update(dt);
+  }
+
+  private openCounter(): void {
+    const cfg = dayConfig(this.ctx.state.day);
+    const rule = cfg.newRule;
+    if (rule && !this.ctx.state.activeRules.some((r) => r.id === rule.id)) {
+      this.ctx.state.activeRules.push(rule);
     }
     this.ctx.goTo(new CounterScene(this.ctx));
   }
 
   render(r: Renderer): void {
-    const cfg = configJour(this.ctx.state.jour);
+    const cfg = dayConfig(this.ctx.state.day);
 
     r.clear(PAL.bg);
 
     // Dim glimpse of the pack wall behind the briefing.
-    drawPresentoir(r, this.packs);
+    drawShelf(r, this.packs);
     // 50% dither dimming so the ambiance recedes behind the paper card.
-    for (let yy = 0; yy < VH; yy += 2) r.hline(0, yy, VW, PAL.ombre);
+    for (let yy = 0; yy < VH; yy += 2) r.hline(0, yy, VW, PAL.shadow);
+
+    // Everything below slides in together from the top.
+    r.ctx.save();
+    r.ctx.translate(0, this.slideY);
 
     // The paper briefing card.
     this.panel.draw(r);
@@ -88,14 +137,15 @@ export class DayIntroScene implements Scene {
 
     let y = py + 18;
 
-    if (cfg.nouvelleRegle) {
-      // Highlighted "new rule" card on the paper.
-      const lines = this.wrapLines(r, cfg.nouvelleRegle.description, cw - 12);
+    if (cfg.newRule) {
+      // Highlighted "new rule" card on the paper; pops in with a small offset.
+      const lines = this.wrapLines(r, cfg.newRule.description, cw - 12);
       const cardH = 15 + lines.length * 9 + 5;
-      r.rect(cx, y, cw, cardH, PAL.woodDark);
-      r.stroke(cx, y, cw, cardH, PAL.fdjJaune, 1);
-      r.text('NOUVELLE RÈGLE', cx + 6, y + 5, { color: PAL.fdjJaune, scale: 1, align: 'left' });
-      let ly = y + 15;
+      const cy = y + this.cardOffset;
+      r.rect(cx, cy, cw, cardH, PAL.woodDark);
+      r.stroke(cx, cy, cw, cardH, PAL.fdjYellow, 1);
+      r.text('NOUVELLE RÈGLE', cx + 6, cy + 5, { color: PAL.fdjYellow, scale: 1, align: 'left' });
+      let ly = cy + 15;
       for (const line of lines) {
         r.text(line, cx + 6, ly, { color: PAL.paper, scale: 1, align: 'left' });
         ly += 9;
@@ -103,7 +153,7 @@ export class DayIntroScene implements Scene {
       y += cardH + 8;
     } else {
       r.text("Pas de nouvelle règle aujourd'hui.", cx, y, {
-        color: PAL.peauOmbre,
+        color: PAL.skinShadow,
         scale: 1,
         align: 'left',
       });
@@ -111,7 +161,7 @@ export class DayIntroScene implements Scene {
     }
 
     // Briefing / intro text (paragraphs split on newlines, then word-wrapped).
-    const buttonTop = this.bouton.rect.y - 4;
+    const buttonTop = this.button.rect.y - 4;
     for (const para of cfg.intro.split('\n')) {
       for (const line of this.wrapLines(r, para, cw)) {
         if (y > buttonTop) break;
@@ -120,11 +170,15 @@ export class DayIntroScene implements Scene {
       }
     }
 
-    this.bouton.draw(r);
+    this.button.draw(r);
+
+    r.ctx.restore();
   }
 
   onClick(p: { x: number; y: number }): void {
-    if (this.bouton.hit(p)) this.bouton.click();
+    // Ignore clicks until the card has settled (button sits at its final spot).
+    if (!this.ready) return;
+    if (this.button.hit(p)) this.button.click();
   }
 
   /** Naive word-wrap using renderer.measure; returns the wrapped lines. */

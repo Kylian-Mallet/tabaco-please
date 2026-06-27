@@ -6,7 +6,7 @@
 
 import type { Renderer } from './renderer';
 import { PAL } from './palette';
-import { drawPiece } from './sprites';
+import { drawCoin } from './sprites';
 
 export interface Rect {
   x: number;
@@ -41,7 +41,7 @@ export class Button {
     this.rect = r;
     this.label = label;
     this.onClick = onClick;
-    this.baseColor = opts?.color ?? PAL.vertMuted;
+    this.baseColor = opts?.color ?? PAL.mutedGreen;
     this.disabled = opts?.disabled ?? false;
   }
 
@@ -49,10 +49,10 @@ export class Button {
     const { x, y, w, h } = this.rect;
 
     let fill = this.baseColor;
-    let textColor: string = PAL.blancCasse;
+    let textColor: string = PAL.offWhite;
     if (this.disabled) {
       fill = PAL.wallDark;
-      textColor = PAL.peauOmbre;
+      textColor = PAL.skinShadow;
     } else if (this.pressed) {
       fill = darken(this.baseColor);
     } else if (this.hovered) {
@@ -67,8 +67,8 @@ export class Button {
 
     // Bevel: light top/left, dark bottom/right (inverted when pressed).
     const sunk = this.pressed && !this.disabled;
-    const tl = this.disabled ? PAL.wall : sunk ? PAL.ink : PAL.blancCasse;
-    const br = this.disabled ? PAL.woodDark : sunk ? PAL.blancCasse : PAL.ombre;
+    const tl = this.disabled ? PAL.wall : sunk ? PAL.ink : PAL.offWhite;
+    const br = this.disabled ? PAL.woodDark : sunk ? PAL.offWhite : PAL.shadow;
     r.hline(x + 1, y + 1, w - 2, tl);
     r.vline(x + 1, y + 1, h - 2, tl);
     r.hline(x + 1, y + h - 2, w - 2, br);
@@ -118,10 +118,10 @@ export class Panel {
 
     if (this.title) {
       const barH = 11;
-      r.rect(x + 2, y + 2, w - 4, barH, PAL.rougeTabac);
-      r.hline(x + 2, y + 2, w - 4, PAL.blancCasse);
+      r.rect(x + 2, y + 2, w - 4, barH, PAL.tobaccoRed);
+      r.hline(x + 2, y + 2, w - 4, PAL.offWhite);
       r.text(this.title, x + 5, y + 4, {
-        color: PAL.blancCasse,
+        color: PAL.offWhite,
         scale: 1,
         align: 'left',
       });
@@ -151,20 +151,20 @@ export class DocumentCard {
     const { x, y, w, h } = this.rect;
 
     // Cream card with shadow + ink frame.
-    r.rect(x + 2, y + 2, w, h, PAL.ombre);
+    r.rect(x + 2, y + 2, w, h, PAL.shadow);
     r.rect(x, y, w, h, PAL.paper);
     r.stroke(x, y, w, h, PAL.ink, 1);
-    r.hline(x + 1, y + 1, w - 2, PAL.blancCasse);
+    r.hline(x + 1, y + 1, w - 2, PAL.offWhite);
 
     // Header band.
     const bandH = 11;
-    r.rect(x + 1, y + 1, w - 2, bandH, PAL.rougeTabac);
-    r.text(this.title, x + 4, y + 3, { color: PAL.blancCasse, scale: 1, align: 'left' });
+    r.rect(x + 1, y + 1, w - 2, bandH, PAL.tobaccoRed);
+    r.text(this.title, x + 4, y + 3, { color: PAL.offWhite, scale: 1, align: 'left' });
 
     // Tricolore hint, top-right.
-    r.rect(x + w - 13, y + 1, 3, bandH, PAL.vertMuted);
+    r.rect(x + w - 13, y + 1, 3, bandH, PAL.mutedGreen);
     r.rect(x + w - 10, y + 1, 3, bandH, PAL.paper);
-    r.rect(x + w - 7, y + 1, 3, bandH, PAL.fdjRouge);
+    r.rect(x + w - 7, y + 1, 3, bandH, PAL.fdjRed);
 
     const padX = 5;
     let textX = x + padX;
@@ -176,10 +176,10 @@ export class DocumentCard {
       const ph = Math.min(34, h - bandH - 12);
       const px0 = x + padX;
       const py0 = contentTop;
-      r.rect(px0, py0, pw, ph, PAL.peau);
+      r.rect(px0, py0, pw, ph, PAL.skin);
       r.stroke(px0, py0, pw, ph, PAL.ink, 1);
-      r.rect(px0 + 9, py0 + 4, 10, 10, PAL.peauOmbre);
-      r.rect(px0 + 5, py0 + 15, 18, ph - 15, PAL.peauOmbre);
+      r.rect(px0 + 9, py0 + 4, 10, 10, PAL.skinShadow);
+      r.rect(px0 + 5, py0 + 15, 18, ph - 15, PAL.skinShadow);
       textX = px0 + pw + 6;
     }
 
@@ -187,7 +187,7 @@ export class DocumentCard {
     let ry = contentTop;
     for (const line of this.lines) {
       r.text(line.label.toUpperCase(), textX, ry, {
-        color: PAL.peauOmbre,
+        color: PAL.skinShadow,
         scale: 1,
         align: 'left',
       });
@@ -196,13 +196,13 @@ export class DocumentCard {
         scale: 1,
         align: 'left',
       });
-      r.hline(textX, ry + 16, w - (textX - x) - padX, PAL.peauOmbre);
+      r.hline(textX, ry + 16, w - (textX - x) - padX, PAL.skinShadow);
       ry += 20;
     }
   }
 }
 
-/** Scrollable / filterable name list (used for the fichier des interdits). */
+/** Scrollable / filterable name list (used for the ban list). */
 export class ListView {
   readonly rect: Rect;
   private readonly items: string[];
@@ -238,18 +238,18 @@ export class ListView {
     // Paper sheet with ink frame.
     r.rect(x, y, w, h, PAL.paper);
     r.stroke(x, y, w, h, PAL.ink, 1);
-    r.hline(x + 1, y + 1, w - 2, PAL.blancCasse);
+    r.hline(x + 1, y + 1, w - 2, PAL.offWhite);
 
     let listTop = y + 4;
     if (this.title) {
       const barH = 11;
       r.rect(x + 1, y + 1, w - 2, barH, PAL.ink);
-      r.text(this.title, x + 4, y + 3, { color: PAL.blancCasse, scale: 1, align: 'left' });
+      r.text(this.title, x + 4, y + 3, { color: PAL.offWhite, scale: 1, align: 'left' });
       listTop = y + barH + 4;
     }
     if (this.query) {
       r.text('> ' + this.query, x + 4, listTop, {
-        color: PAL.vertMuted,
+        color: PAL.mutedGreen,
         scale: 1,
         align: 'left',
       });
@@ -262,13 +262,13 @@ export class ListView {
     let ry = listTop;
     for (let i = 0; i < visible.length; i++) {
       // Zebra striping for readability.
-      if (i % 2 === 1) r.rect(x + 1, ry - 1, w - 2, rowH, PAL.blancCasse);
+      if (i % 2 === 1) r.rect(x + 1, ry - 1, w - 2, rowH, PAL.offWhite);
       r.text(visible[i], x + 5, ry, { color: PAL.ink, scale: 1, align: 'left' });
       ry += rowH;
     }
     if (this.filtered.length > maxRows) {
       r.text(`... +${this.filtered.length - maxRows}`, x + 5, y + h - 9, {
-        color: PAL.peauOmbre,
+        color: PAL.skinShadow,
         scale: 1,
         align: 'left',
       });
@@ -331,15 +331,15 @@ export class MoneyTray {
       const hovered = i === this.hoveredIndex;
 
       if (denom >= 5) {
-        // Billet — paper note.
+        // Bill — paper note.
         const bx = cell.x;
         const by = cell.y + Math.max(0, (cell.h - 12) / 2);
         const bw = cell.w;
         const bh = Math.min(12, cell.h);
-        r.rect(bx, by, bw, bh, hovered ? PAL.blancCasse : PAL.vertMuted);
+        r.rect(bx, by, bw, bh, hovered ? PAL.offWhite : PAL.mutedGreen);
         r.stroke(bx, by, bw, bh, PAL.ink, 1);
         r.text(formatDenom(denom), bx + bw / 2, by + bh / 2 - 3, {
-          color: hovered ? PAL.ink : PAL.blancCasse,
+          color: hovered ? PAL.ink : PAL.offWhite,
           scale: 1,
           align: 'center',
         });
@@ -348,7 +348,7 @@ export class MoneyTray {
         const cx = cell.x + cell.w / 2 - 7;
         const cy = cell.y + cell.h / 2 - 7;
         if (hovered) r.rect(cell.x, cell.y, cell.w, cell.h, PAL.woodLight);
-        drawPiece(r, cx, cy, denom);
+        drawCoin(r, cx, cy, denom);
       }
     }
 
@@ -357,7 +357,7 @@ export class MoneyTray {
     r.rect(x + 1, bandY, w - 2, MoneyTray.TOTAL_BAND - 1, PAL.woodDark);
     r.hline(x + 1, bandY, w - 2, PAL.ink);
     r.text(`TOTAL ${this.total.toFixed(2)} €`, x + 4, bandY + 3, {
-      color: PAL.fdjJaune,
+      color: PAL.fdjYellow,
       scale: 1,
       align: 'left',
     });

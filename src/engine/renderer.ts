@@ -116,7 +116,7 @@ const ACCENTED: Record<string, { base: string; accent: Accent }> = {
 
 /** Palette colors used for sprite() fallback fills, indexed by name hash. */
 const SPRITE_FILLS = [
-  PAL.wood, PAL.wall, PAL.rougeTabac, PAL.vertMuted, PAL.fdjJaune, PAL.peau, PAL.woodLight, PAL.wallDark,
+  PAL.wood, PAL.wall, PAL.tobaccoRed, PAL.mutedGreen, PAL.fdjYellow, PAL.skin, PAL.woodLight, PAL.wallDark,
 ];
 
 function fillFromName(name: string): string {
@@ -182,7 +182,7 @@ export class Renderer {
    * scale 1 => ~7px tall. align left/center/right around x.
    */
   text(s: string, x: number, y: number, opts?: TextOpts): void {
-    const color = opts?.color ?? PAL.blancCasse;
+    const color = opts?.color ?? PAL.offWhite;
     const scale = opts?.scale ?? (opts?.size ? Math.max(1, Math.round(opts.size / GH)) : 1);
     const align = opts?.align ?? 'left';
 

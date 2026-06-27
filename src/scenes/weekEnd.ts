@@ -1,26 +1,27 @@
-// WeekEndScene — "le couperet": fold the week's recette into trésorerie,
-// then deduct LOYER + COMMANDE_FOURNISSEUR. Faillite -> GameOver,
+// WeekEndScene — "the reckoning": fold the week's revenue into the cash balance,
+// then deduct RENT + SUPPLIER_ORDER. Bankruptcy -> GameOver,
 // else continue -> next day's DayIntro.
 
 import type { Scene } from '../engine/stateMachine';
 import type { Renderer } from '../engine/renderer';
 import type { GameContext } from '../game/types';
-import { LOYER, COMMANDE_FOURNISSEUR } from '../game/types';
-import { couperetSemaine } from '../game/economy';
+import { RENT, SUPPLIER_ORDER } from '../game/types';
+import { weeklyReckoning, isCampaignEnd } from '../game/economy';
 import { Button, Panel } from '../engine/ui';
 import { PAL } from '../engine/palette';
 import { VW } from '../engine/layout';
 import { DayIntroScene } from './dayIntro';
 import { GameOverScene } from './gameOver';
+import { EpilogueScene } from './epilogue';
 
 export class WeekEndScene implements Scene {
   private readonly ctx: GameContext;
 
   // Captured snapshot of the books for display, set in enter().
-  private recetteSemaine = 0;
-  private tresorerieAvant = 0;
-  private tresorerieApres = 0;
-  private faillite = false;
+  private weekRevenue = 0;
+  private cashBefore = 0;
+  private cashAfter = 0;
+  private bankrupt = false;
   private detail = '';
 
   private readonly buttons: Button[] = [];
@@ -35,30 +36,36 @@ export class WeekEndScene implements Scene {
 
   enter(): void {
     const state = this.ctx.state;
-    // Snapshot pre-couperet figures for the bilan (recette folds into trésorerie).
-    this.recetteSemaine = state.recetteDuJour;
-    this.tresorerieAvant = state.tresorerie;
+    // Snapshot pre-reckoning figures for the summary (revenue folds into cash).
+    this.weekRevenue = state.dayRevenue;
+    this.cashBefore = state.cash;
 
-    const res = couperetSemaine(state);
-    this.faillite = res.faillite;
+    const res = weeklyReckoning(state);
+    this.bankrupt = res.bankrupt;
     this.detail = res.detail;
-    this.tresorerieApres = state.tresorerie;
+    this.cashAfter = state.cash;
 
     this.panel = new Panel(this.panelRect, { title: 'COMPTES DU BUREAU DE TABAC' });
 
     const btnRect = { x: VW / 2 - 92, y: 246, w: 184, h: 20 };
-    if (this.faillite) {
+    if (this.bankrupt) {
       this.buttons.push(
         new Button(btnRect, 'FERMETURE DÉFINITIVE', () => {
           this.ctx.goTo(new GameOverScene(this.ctx));
-        }, { color: PAL.rougeTabac })
+        }, { color: PAL.tobaccoRed })
       );
     } else {
       this.buttons.push(
         new Button(btnRect, 'SEMAINE SUIVANTE', () => {
-          state.jour += 1;
+          // Defensive: if this reckoning closed the final campaign day, go to the
+          // finale rather than rolling into another week.
+          if (isCampaignEnd(state.day)) {
+            this.ctx.goTo(new EpilogueScene(this.ctx));
+            return;
+          }
+          state.day += 1;
           this.ctx.goTo(new DayIntroScene(this.ctx));
-        }, { color: PAL.vertMuted })
+        }, { color: PAL.mutedGreen })
       );
     }
   }
@@ -67,24 +74,24 @@ export class WeekEndScene implements Scene {
     // --- Dramatic dim backdrop -------------------------------------------
     r.clear(PAL.bg);
     // Faint tobacco-brown haze in the middle so the plaque sits in a pool of light.
-    r.rect(0, 30, VW, 200, PAL.ombre);
+    r.rect(0, 30, VW, 200, PAL.shadow);
     r.rect(20, 44, VW - 40, 172, PAL.woodDark);
     // Top + bottom shadow bands frame the screen.
     for (let i = 0; i < 6; i++) {
       if (i % 2 === 0) {
         r.hline(0, i, VW, PAL.bg);
-        r.hline(0, 28 - i, VW, PAL.ombre);
+        r.hline(0, 28 - i, VW, PAL.shadow);
       }
     }
 
     // --- Title -----------------------------------------------------------
     r.text('LE COUPERET', VW / 2, 10, {
-      color: PAL.fdjJaune,
+      color: PAL.fdjYellow,
       scale: 2,
       align: 'center',
     });
     r.text('BILAN DE FIN DE SEMAINE', VW / 2, 32, {
-      color: PAL.peau,
+      color: PAL.skin,
       scale: 1,
       align: 'center',
     });
@@ -99,34 +106,34 @@ export class WeekEndScene implements Scene {
     const rx = px + pw - 12;
 
     let y = py + 22;
-    const line = (label: string, value: string, color: string = PAL.blancCasse) => {
-      r.text(label, lx, y, { color: PAL.peau, scale: 1, align: 'left' });
+    const line = (label: string, value: string, color: string = PAL.offWhite) => {
+      r.text(label, lx, y, { color: PAL.skin, scale: 1, align: 'left' });
       r.text(value, rx, y, { color, scale: 1, align: 'right' });
       y += 18;
     };
 
-    line('Trésorerie début', euros(this.tresorerieAvant));
-    line('Recette de la semaine', '+ ' + euros(this.recetteSemaine), PAL.vertMuted);
-    line('Loyer du local', '- ' + euros(LOYER), PAL.rougeTabac);
-    line('Commande fournisseur', '- ' + euros(COMMANDE_FOURNISSEUR), PAL.rougeTabac);
+    line('Trésorerie début', euros(this.cashBefore));
+    line('Recette de la semaine', '+ ' + euros(this.weekRevenue), PAL.mutedGreen);
+    line('Loyer du local', '- ' + euros(RENT), PAL.tobaccoRed);
+    line('Commande fournisseur', '- ' + euros(SUPPLIER_ORDER), PAL.tobaccoRed);
 
     // Separator rule (hard pixel edges).
     r.hline(lx, y - 4, rx - lx, PAL.ink);
     r.hline(lx, y - 3, rx - lx, PAL.woodLight);
     y += 6;
 
-    // Solde — the bottom line.
-    const soldeColor = this.tresorerieApres < 0 ? PAL.rougeTabac : PAL.vertMuted;
-    r.text('SOLDE', lx, y, { color: PAL.blancCasse, scale: 1, align: 'left' });
-    r.text(euros(this.tresorerieApres), rx, y, {
-      color: soldeColor,
+    // Balance — the bottom line.
+    const balanceColor = this.cashAfter < 0 ? PAL.tobaccoRed : PAL.mutedGreen;
+    r.text('SOLDE', lx, y, { color: PAL.offWhite, scale: 1, align: 'left' });
+    r.text(euros(this.cashAfter), rx, y, {
+      color: balanceColor,
       scale: 1,
       align: 'right',
     });
 
     // --- Verdict banner --------------------------------------------------
-    const verdict = this.faillite ? 'FAILLITE' : 'SEMAINE BOUCLÉE';
-    const vColor = this.faillite ? PAL.rougeTabac : PAL.vertMuted;
+    const verdict = this.bankrupt ? 'FAILLITE' : 'SEMAINE BOUCLÉE';
+    const vColor = this.bankrupt ? PAL.tobaccoRed : PAL.mutedGreen;
     const bannerY = py + this.panelRect.h + 6;
     const bw = r.measure(verdict, 2) + 16;
     const bx = Math.round(VW / 2 - bw / 2);
@@ -136,7 +143,7 @@ export class WeekEndScene implements Scene {
 
     if (this.detail) {
       r.text(this.detail, VW / 2, bannerY + 22, {
-        color: PAL.peau,
+        color: PAL.skin,
         scale: 1,
         align: 'center',
       });
