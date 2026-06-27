@@ -13,6 +13,7 @@ import type { Renderer } from '../engine/renderer';
 import type { GameContext } from '../game/types';
 import { chooseEnding, type Ending } from '../game/economy';
 import { freshState } from '../main';
+import { clearSave } from '../engine/save';
 import { Button, Panel, type Rect } from '../engine/ui';
 import { PAL } from '../engine/palette';
 import { VW, VH } from '../engine/layout';
@@ -83,6 +84,8 @@ export class EpilogueScene implements Scene {
   }
 
   enter(): void {
+    // The campaign is over: drop the auto-save so "Reprendre" won't resume it.
+    clearSave();
     if (this.grim) {
       // "Rideau de fer": the shutter accelerates down, then the frame jolts.
       this.tweens.push(

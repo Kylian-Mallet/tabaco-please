@@ -46,15 +46,16 @@ export class TitleScene implements Scene {
     this.continueBtn = hasSave
       ? new Button(
           { x: cx, y: 222, w: bw, h: bh },
-          'CONTINUER',
+          'REPRENDRE',
           () => this.continueSaved(),
           { color: PAL.mutedGreen },
         )
       : null;
 
+    // With a save: "NOUVELLE PARTIE" (alongside REPRENDRE). Without: just "COMMENCER".
     this.newGame = new Button(
       { x: cx, y: hasSave ? 246 : 228, w: bw, h: bh },
-      'NOUVELLE PARTIE',
+      hasSave ? 'NOUVELLE PARTIE' : 'COMMENCER',
       () => this.startNewGame(),
       { color: PAL.tobaccoRed },
     );

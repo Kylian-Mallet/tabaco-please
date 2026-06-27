@@ -29,6 +29,16 @@ export function save(s: GameState): void {
   }
 }
 
+/** Remove the saved run (e.g. when a campaign ends so "Continuer" won't resume it). */
+export function clearSave(): void {
+  if (!storageAvailable()) return;
+  try {
+    globalThis.localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 /** Load the saved run, or null if nothing saved / unavailable / corrupt. */
 export function load(): GameState | null {
   if (!storageAvailable()) return null;

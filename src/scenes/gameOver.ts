@@ -15,6 +15,7 @@ import { freshState } from '../main';
 import { PAL } from '../engine/palette';
 import { VW, VH } from '../engine/layout';
 import { shake } from '../engine/fx';
+import { clearSave } from '../engine/save';
 import { TitleScene } from './title';
 
 export class GameOverScene implements Scene {
@@ -42,6 +43,8 @@ export class GameOverScene implements Scene {
   }
 
   enter(): void {
+    // Run is over (bankruptcy): drop the auto-save so "Reprendre" won't resume it.
+    clearSave();
     // The shutter slamming shut jolts the frame.
     shake(3, 0.4);
   }

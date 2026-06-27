@@ -7,6 +7,7 @@ import { VW, VH } from '../engine/layout';
 import { drawShelf } from '../engine/sprites';
 import { Tween, Ease } from '../engine/tween';
 import { dayConfig } from '../game/content/days';
+import { save } from '../engine/save';
 import { CounterScene } from './counter';
 
 /**
@@ -96,6 +97,11 @@ export class DayIntroScene implements Scene {
         this.ready = true;
       },
     });
+  }
+
+  /** Auto-save at the start of every day (the natural campaign checkpoint). */
+  enter(): void {
+    save(this.ctx.state);
   }
 
   update(dt: number): void {

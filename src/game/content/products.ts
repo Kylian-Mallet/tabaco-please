@@ -33,7 +33,7 @@ export const PRODUCTS: Product[] = [
   { id: 'briquet-bic', name: 'Briquet Bic', category: 'epicerie', group: 'base', price: 1.5, minAge: 0 },
   { id: 'barre-chocolat', name: 'Barre Twix', category: 'epicerie', group: 'base', price: 1.1, minAge: 0 },
   { id: 'bouteille-eau', name: "Bouteille d'eau Cristaline", category: 'epicerie', group: 'base', price: 1.0, minAge: 0 },
-  { id: 'timbre-poste', name: 'Timbre Lettre Verte', category: 'epicerie', group: 'base', price: 1.39, minAge: 0 },
+  { id: 'timbre-poste', name: 'Timbre Lettre Verte', category: 'epicerie', group: 'base', price: 1.4, minAge: 0 },
 
   // --- Jeux / FDJ (18+) — base group ---
   { id: 'ticket-cash', name: 'Ticket Cash', category: 'jeux', group: 'base', price: 5.0, minAge: 18 },
@@ -74,6 +74,14 @@ export const FAKE_PRODUCTS: Product[] = [
   { id: 'puff-9000', name: 'Puff Fatia 9K', category: 'tabac', group: 'base', price: 12.0, minAge: 18, inStock: false, color: '#b1322f' },
   { id: 'ticket-ovni', name: "Ticket OVNI d'Aussonne", category: 'jeux', group: 'base', price: 5.0, minAge: 18, fake: true, color: '#34507e' },
 ];
+
+// Change is made with coins down to 0.10 €, so every REAL price must be a
+// multiple of 0.10 (otherwise the rendered change can't be composed). Snap them
+// defensively — a no-op for the curated prices, a safety net for future edits.
+// Fake products are excluded: they go through the bluff path, never change-making.
+for (const p of PRODUCTS) {
+  p.price = Math.round(p.price * 10) / 10;
+}
 
 /** A product is sellable only if it's carried (in stock) and real (not invented). */
 export function isAvailable(p: Product): boolean {

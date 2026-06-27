@@ -1689,13 +1689,28 @@ function seqOf(c: Client): number {
   return m ? parseInt(m[1], 10) : 0;
 }
 
-/** Smallest sensible bill/coin a customer hands over for a given price. */
+/**
+ * The amount a customer hands over — varied, not always the smallest bill.
+ * Picks a random single tender >= price (smaller ones weighted more common, but
+ * a big note like 50 € for a cheap item happens), with an occasional exact payment.
+ */
 function chooseBill(price: number): number {
-  const bills = [5, 10, 20, 50];
-  for (const b of bills) {
-    if (b >= price) return b;
+  // Candidate single tenders (notes + a 2 € coin) that cover the price.
+  const tenders = [2, 5, 10, 20, 50].filter((b) => b >= price);
+  if (tenders.length === 0) return Math.ceil(price / 50) * 50;
+
+  // ~12% of the time the customer pays exactly -> no change due.
+  if (Math.random() < 0.12) return round2(price);
+
+  // Weighted random: weight ~ 1/(rank+1) so the smallest covering tender is the
+  // most likely, but larger ones (incl. 50 € on a cheap item) still come up.
+  const weights = tenders.map((_, i) => 1 / (i + 1));
+  let roll = Math.random() * weights.reduce((a, b) => a + b, 0);
+  for (let i = 0; i < tenders.length; i++) {
+    roll -= weights[i];
+    if (roll <= 0) return tenders[i];
   }
-  return Math.ceil(price / 50) * 50;
+  return tenders[tenders.length - 1];
 }
 
 function formatDate(iso: string): string {
