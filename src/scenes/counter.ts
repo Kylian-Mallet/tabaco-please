@@ -75,7 +75,7 @@ import { shake, flash, floatText } from '../engine/fx';
 import { mathHelpEnabled } from '../engine/options';
 import { DayEndScene } from './dayEnd';
 
-const PATIENCE_DRAIN_PER_SEC = 5; // base patience lost per second while waiting
+const PATIENCE_DRAIN_PER_SEC = 2.6; // base patience lost per second while waiting
 const CNI_COST = 15; // patience lost each time we ask for the ID card
 const TOAST_TTL = 3.4; // seconds a feedback toast stays on screen
 
@@ -118,7 +118,7 @@ const POLICE_ARRIVAL_TIME = 1.4;
 const BET_LEAVE_TIME = 7;
 
 /** Geometry of the FDJ betting sub-panel (modal over the lower half). */
-const BET_PANEL: Rect = { x: 92, y: 28, w: 296, h: 214 };
+const BET_PANEL: Rect = { x: 78, y: 16, w: 344, h: 234 };
 
 /** A bet client carries exactly one betting intent. */
 function isBettingClient(c: Client | undefined): boolean {
@@ -273,6 +273,7 @@ export class CounterScene implements Scene {
   private readonly btnCancelBet: Button;
   private readonly btnPay: Button;
   private readonly btnRefusePay: Button;
+  private readonly btnCloseTerminal: Button;
   private readonly btnScoreAUp: Button;
   private readonly btnScoreADown: Button;
   private readonly btnScoreBUp: Button;
@@ -370,38 +371,43 @@ export class CounterScene implements Scene {
       () => this.openTerminal(),
       { color: PAL.fdjRed },
     );
-    // Bottom-row actions inside the betting panel (two columns).
-    const betLeft: Rect = { x: 104, y: 224, w: 130, h: 16 };
-    const betRight: Rect = { x: 252, y: 224, w: 124, h: 16 };
-    this.btnTakeBet = new Button({ ...betLeft }, 'PRENDRE LE PARI', () => this.takeBet(), {
+    // Bottom-row actions inside the betting panel (three columns).
+    const betCol1: Rect = { x: 88, y: 230, w: 110, h: 18 };
+    const betCol2: Rect = { x: 204, y: 230, w: 108, h: 18 };
+    const betCol3: Rect = { x: 318, y: 230, w: 96, h: 18 };
+    this.btnTakeBet = new Button({ ...betCol1 }, 'PRENDRE LE PARI', () => this.takeBet(), {
       color: PAL.mutedGreen,
     });
-    this.btnRefuseBet = new Button({ ...betRight }, 'REFUSER', () => this.refuseBet(), {
+    this.btnRefuseBet = new Button({ ...betCol2 }, 'REFUSER', () => this.refuseBet(), {
       color: PAL.tobaccoRed,
     });
-    this.btnCashIn = new Button({ ...betLeft }, 'ENCAISSER', () => this.cashInBet(), {
+    this.btnCashIn = new Button({ ...betCol1 }, 'ENCAISSER', () => this.cashInBet(), {
       color: PAL.mutedGreen,
     });
-    this.btnCancelBet = new Button({ ...betRight }, 'ANNULER', () => this.cancelBet(), {
+    this.btnCancelBet = new Button({ ...betCol2 }, 'ANNULER PARI', () => this.cancelBet(), {
       color: PAL.fdjYellow,
     });
-    this.btnPay = new Button({ ...betLeft }, 'PAYER', () => this.payTicket(), {
+    this.btnPay = new Button({ ...betCol1 }, 'PAYER', () => this.payTicket(), {
       color: PAL.mutedGreen,
     });
-    this.btnRefusePay = new Button({ ...betRight }, 'REFUSER', () => this.refusePay(), {
+    this.btnRefusePay = new Button({ ...betCol2 }, 'REFUSER', () => this.refusePay(), {
       color: PAL.tobaccoRed,
     });
+    // Close the terminal and go back to the counter (no action taken).
+    this.btnCloseTerminal = new Button({ ...betCol3 }, 'ANNULER', () => this.closeTerminal(), {
+      color: PAL.wallDark,
+    });
     // Score steppers (Mode B): +/- over each digit cell of the score box.
-    this.btnScoreAUp = new Button({ x: 195, y: 100, w: 16, h: 12 }, '+', () => this.bumpScore('a', 1), {
+    this.btnScoreAUp = new Button({ x: 232, y: 116, w: 16, h: 12 }, '+', () => this.bumpScore('a', 1), {
       color: PAL.wood,
     });
-    this.btnScoreADown = new Button({ x: 195, y: 144, w: 16, h: 12 }, '-', () => this.bumpScore('a', -1), {
+    this.btnScoreADown = new Button({ x: 232, y: 156, w: 16, h: 12 }, '-', () => this.bumpScore('a', -1), {
       color: PAL.wood,
     });
-    this.btnScoreBUp = new Button({ x: 218, y: 100, w: 16, h: 12 }, '+', () => this.bumpScore('b', 1), {
+    this.btnScoreBUp = new Button({ x: 258, y: 116, w: 16, h: 12 }, '+', () => this.bumpScore('b', 1), {
       color: PAL.wood,
     });
-    this.btnScoreBDown = new Button({ x: 218, y: 144, w: 16, h: 12 }, '-', () => this.bumpScore('b', -1), {
+    this.btnScoreBDown = new Button({ x: 258, y: 156, w: 16, h: 12 }, '-', () => this.bumpScore('b', -1), {
       color: PAL.wood,
     });
   }
@@ -944,6 +950,15 @@ export class CounterScene implements Scene {
     playSfx('click');
   }
 
+  /** Close the FDJ terminal and return to the counter, taking no action. */
+  private closeTerminal(): void {
+    this.betSelectedId = null;
+    this.betRegistered = false;
+    this.betLeaveTimer = 0;
+    this.step = 'service';
+    playSfx('click');
+  }
+
   /** Mode A: click a match row in the list (only the named match selects). */
   private selectMatch(id: string): void {
     const c = this.client;
@@ -1054,12 +1069,17 @@ export class CounterScene implements Scene {
 
     const gain = m ? payout(c.ticket, m) : 0;
     if (gain > 0) {
-      // Legitimate winning payout (finished match, score transcribed, pick wins):
-      // the gain leaves the till.
-      this.ctx.state.dayRevenue = round2(this.ctx.state.dayRevenue - gain);
+      // Legitimate winning ticket: the winnings are FDJ's money — the tabac pays
+      // from the till but is REIMBURSED, so it is NOT a loss. The shop keeps a
+      // small commission. (The skill/punishment is paying a LOSING/fake ticket.)
+      const commission = Math.max(0.5, round2(c.ticket.stake * 0.05));
+      this.ctx.state.dayRevenue = round2(this.ctx.state.dayRevenue + commission);
       playSfx('sale');
-      this.floatMoney(`-${gain.toFixed(2)} €`, PAL.tobaccoRed);
-      this.pushToast(`Ticket gagnant payé : -${gain.toFixed(2)} €.`, '#9ccc65');
+      this.floatMoney(`+${commission.toFixed(2)} €`, PAL.mutedGreen);
+      this.pushToast(
+        `Ticket gagnant payé (avance FDJ). Commission +${commission.toFixed(2)} €.`,
+        '#9ccc65',
+      );
     } else {
       // Losing / fake / unfinished ticket paid out -> loss + fault.
       const loss = m ? round2(c.ticket.stake * oddsForPick(m.odds, c.ticket.pick)) : c.ticket.stake;
@@ -1292,13 +1312,16 @@ export class CounterScene implements Scene {
   }
 
   private clickBetting(p: { x: number; y: number }): void {
+    // Always available: close the terminal, back to the counter.
+    if (this.btnCloseTerminal.hit(p)) return this.btnCloseTerminal.click();
+
     if (this.betMode === 'place') {
       if (!this.betRegistered) {
-        // Select a match by clicking its row in the list.
-        const rowH = 12;
-        const listX = 104;
-        const listW = 248;
-        const listY = 70;
+        // Select a match by clicking its row (coords mirror drawBettingPlace).
+        const rowH = 13;
+        const listX = BET_PANEL.x + 14;
+        const listW = BET_PANEL.w - 28;
+        const listY = BET_PANEL.y + 52;
         for (let i = 0; i < this.betMatches.length; i++) {
           const ry = listY + i * rowH;
           if (inRect(p, { x: listX, y: ry, w: listW, h: rowH - 1 })) {
@@ -1891,15 +1914,19 @@ export class CounterScene implements Scene {
   private drawBetting(r: Renderer): void {
     new Panel(BET_PANEL, { title: 'TERMINAL FDJ — PARIS SPORTIFS' }).draw(r);
 
-    // Current counter clock (the judge-the-clock channel).
-    r.text(`Horloge : ${this.clock}`, BET_PANEL.x + 8, BET_PANEL.y + 14, {
+    // Current counter clock (the judge-the-clock channel), top-right so it never
+    // collides with the ticket/match block on the left.
+    r.text(`Horloge : ${this.clock}`, BET_PANEL.x + BET_PANEL.w - 8, BET_PANEL.y + 16, {
       color: PAL.fdjYellow,
       scale: 1,
-      align: 'left',
+      align: 'right',
     });
 
     if (this.betMode === 'place') this.drawBettingPlace(r);
     else this.drawBettingSettle(r);
+
+    // Always available: close the terminal and go back to the counter.
+    this.btnCloseTerminal.draw(r);
   }
 
   /** Mode A panel: the day's match list (or the registered-bet collection view). */
@@ -1907,15 +1934,15 @@ export class CounterScene implements Scene {
     const c = this.client;
 
     if (!this.betRegistered) {
-      r.text('Sélectionnez le match nommé, puis prenez le pari.', BET_PANEL.x + 8, BET_PANEL.y + 26, {
+      r.text('Sélectionnez le match nommé, puis prenez le pari.', BET_PANEL.x + 8, BET_PANEL.y + 30, {
         color: PAL.offWhite,
         scale: 1,
         align: 'left',
       });
-      const rowH = 12;
-      const listX = 104;
-      const listW = 248;
-      const listY = 70;
+      const rowH = 13;
+      const listX = BET_PANEL.x + 14;
+      const listW = BET_PANEL.w - 28;
+      const listY = BET_PANEL.y + 52;
       this.betMatches.forEach((m, i) => {
         const ry = listY + i * rowH;
         drawMatchRow(r, listX, ry, listW, {
@@ -1935,19 +1962,24 @@ export class CounterScene implements Scene {
     }
 
     // Registered: a coupon + the plea, awaiting collection.
-    drawBetSlip(r, 120, 80, PAL.fdjRed);
+    drawBetSlip(r, BET_PANEL.x + 14, BET_PANEL.y + 48, PAL.fdjRed);
     const m = c?.betRequest ? matchById(this.ctx.state.day, c.betRequest.matchId) : undefined;
     const stake = c?.betRequest?.stake ?? 0;
-    const tx = 168;
-    r.text('Pari enregistré :', tx, 84, { color: PAL.offWhite, scale: 1, align: 'left' });
-    if (m) r.text(`${m.teamA} - ${m.teamB}`, tx, 96, { color: PAL.paper, scale: 1, align: 'left' });
-    if (c?.betRequest)
-      r.text(`Choix : ${pickLabel(c.betRequest.pick, m)}`, tx, 106, {
+    const tx = BET_PANEL.x + 62;
+    r.text('Pari enregistré :', tx, BET_PANEL.y + 50, { color: PAL.offWhite, scale: 1, align: 'left' });
+    if (m)
+      r.text(`${m.teamA} - ${m.teamB}`, tx, BET_PANEL.y + 62, {
         color: PAL.paper,
         scale: 1,
         align: 'left',
       });
-    r.text(`Mise à encaisser : ${stake.toFixed(2)} €`, tx, 116, {
+    if (c?.betRequest)
+      r.text(`Choix : ${pickLabel(c.betRequest.pick, m)}`, tx, BET_PANEL.y + 74, {
+        color: PAL.paper,
+        scale: 1,
+        align: 'left',
+      });
+    r.text(`Mise à encaisser : ${stake.toFixed(2)} €`, tx, BET_PANEL.y + 86, {
       color: PAL.fdjYellow,
       scale: 1,
       align: 'left',
@@ -1955,13 +1987,14 @@ export class CounterScene implements Scene {
     const plea = c?.fraudster
       ? 'Le client : « Je file, je reviens payer après le match ! »'
       : 'Encaissez la mise pour conclure le pari.';
-    r.text(plea, BET_PANEL.x + 8, 150, { color: PAL.tobaccoRed, scale: 1, align: 'left' });
+    r.text(plea, BET_PANEL.x + 8, BET_PANEL.y + 134, { color: PAL.tobaccoRed, scale: 1, align: 'left' });
     if (this.betLeaveTimer > 0) {
-      r.text(`Le client s'impatiente : ${Math.ceil(this.betLeaveTimer)}s`, BET_PANEL.x + 8, 162, {
-        color: PAL.fdjRed,
-        scale: 1,
-        align: 'left',
-      });
+      r.text(
+        `Le client s'impatiente : ${Math.ceil(this.betLeaveTimer)}s`,
+        BET_PANEL.x + 8,
+        BET_PANEL.y + 148,
+        { color: PAL.fdjRed, scale: 1, align: 'left' },
+      );
     }
     this.btnCashIn.draw(r);
     this.btnCancelBet.draw(r);
@@ -1973,12 +2006,17 @@ export class CounterScene implements Scene {
     const ticket = c?.ticket;
     const m = ticket ? matchById(this.ctx.state.day, ticket.matchId) : undefined;
 
-    drawBetSlip(r, 104, 50, PAL.fdjYellow);
-    const tx = 150;
-    r.text('Ticket présenté :', tx, 44, { color: PAL.offWhite, scale: 1, align: 'left' });
-    if (m) r.text(`${m.teamA} - ${m.teamB}`, tx, 54, { color: PAL.paper, scale: 1, align: 'left' });
+    drawBetSlip(r, BET_PANEL.x + 14, BET_PANEL.y + 28, PAL.fdjYellow);
+    const tx = BET_PANEL.x + 62;
+    r.text('Ticket présenté :', tx, BET_PANEL.y + 28, { color: PAL.offWhite, scale: 1, align: 'left' });
+    if (m)
+      r.text(`${m.teamA} - ${m.teamB}`, tx, BET_PANEL.y + 40, {
+        color: PAL.paper,
+        scale: 1,
+        align: 'left',
+      });
     if (ticket)
-      r.text(`Pari : ${pickLabel(ticket.pick, m)}  Mise : ${ticket.stake} €`, tx, 64, {
+      r.text(`Pari : ${pickLabel(ticket.pick, m)}  Mise : ${ticket.stake} €`, tx, BET_PANEL.y + 52, {
         color: PAL.paper,
         scale: 1,
         align: 'left',
@@ -1989,23 +2027,23 @@ export class CounterScene implements Scene {
       r.text(
         `Match terminé — score officiel : ${m.finalScore.a} - ${m.finalScore.b}`,
         BET_PANEL.x + 8,
-        82,
+        BET_PANEL.y + 78,
         { color: PAL.mutedGreen, scale: 1, align: 'left' },
       );
     } else {
-      r.text('Match NON terminé — aucun score officiel.', BET_PANEL.x + 8, 82, {
+      r.text('Match NON terminé — aucun score officiel.', BET_PANEL.x + 8, BET_PANEL.y + 78, {
         color: PAL.fdjRed,
         scale: 1,
         align: 'left',
       });
     }
 
-    r.text('Saisissez le score final :', BET_PANEL.x + 8, 92, {
+    r.text('Saisissez le score final :', BET_PANEL.x + 8, BET_PANEL.y + 92, {
       color: PAL.offWhite,
       scale: 1,
       align: 'left',
     });
-    drawScoreEntry(r, 197, 122, this.scoreA, this.scoreB);
+    drawScoreEntry(r, 228, 132, this.scoreA, this.scoreB);
     this.btnScoreAUp.draw(r);
     this.btnScoreADown.draw(r);
     this.btnScoreBUp.draw(r);
@@ -2020,11 +2058,11 @@ export class CounterScene implements Scene {
       r.text(
         `Issue saisie : ${pickLabel(entered, m)} — ${win ? 'TICKET GAGNANT' : 'TICKET PERDANT'}`,
         BET_PANEL.x + 8,
-        165,
+        BET_PANEL.y + 184,
         { color: win ? PAL.mutedGreen : PAL.tobaccoRed, scale: 1, align: 'left' },
       );
     } else if (ticket) {
-      r.text('Règlement impossible : match non terminé.', BET_PANEL.x + 8, 165, {
+      r.text('Règlement impossible : match non terminé.', BET_PANEL.x + 8, BET_PANEL.y + 184, {
         color: PAL.tobaccoRed,
         scale: 1,
         align: 'left',

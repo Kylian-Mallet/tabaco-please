@@ -18,7 +18,7 @@ import { CounterScene } from './counter';
  */
 export class DayIntroScene implements Scene {
   private readonly ctx: GameContext;
-  private readonly config = { panel: { x: 80, y: 40, w: 320, h: 180 } };
+  private readonly config = { panel: { x: 40, y: 18, w: 400, h: 236 } };
   private readonly panel: Panel;
   private readonly button: Button;
   /** Ambient pack wall behind the briefing card. */

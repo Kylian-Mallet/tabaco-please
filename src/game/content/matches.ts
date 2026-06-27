@@ -96,8 +96,13 @@ export function matchesForDay(day: number): MatchInfo[] {
 
   const matches: MatchInfo[] = [];
 
-  // Finished matches (Mode B) — played earlier, scores in.
-  const doneKickoffs = ['06:00', '06:45', '07:30'];
+  // Finished matches (Mode B) — played earlier this morning, varied each day.
+  const doneKickoffs: string[] = [];
+  let dt = 255 + rint(rng, 60); // ~04:15..05:15
+  for (let i = 0; i < 3; i++) {
+    doneKickoffs.push(fromMinutes(Math.min(465, dt))); // never past 07:45
+    dt += 45 + rint(rng, 55);
+  }
   doneKickoffs.forEach((kickoff, i) => {
     matches.push({
       id: `m${day}-d${i}`,
@@ -110,14 +115,28 @@ export function matchesForDay(day: number): MatchInfo[] {
     });
   });
 
-  // Upcoming matches (Mode A) — early ones cross the clock during the day.
-  const upcomingKickoffs = ['08:30', '08:50', '09:10', '12:00', '15:00', '18:00', '21:00'];
-  upcomingKickoffs.forEach((kickoff, i) => {
+  // Upcoming matches (Mode A), varied per day:
+  //  - a couple in the morning "crossing window" (08:10..09:05) so the advancing
+  //    clock can cross them mid-day (the judge-the-clock tension), and
+  //  - several later in the day, spread across the afternoon/evening.
+  const upcomingMins: number[] = [];
+  let ct = 490 + rint(rng, 15); // ~08:10
+  const nCross = 2 + rint(rng, 2); // 2-3 morning matches
+  for (let i = 0; i < nCross; i++) {
+    upcomingMins.push(ct);
+    ct += 12 + rint(rng, 20);
+  }
+  let lt = 600 + rint(rng, 90); // ~10:00..11:30
+  for (let i = 0; i < 4; i++) {
+    upcomingMins.push(lt);
+    lt += 110 + rint(rng, 140);
+  }
+  upcomingMins.forEach((mins, i) => {
     matches.push({
       id: `m${day}-u${i}`,
       teamA: team(),
       teamB: team(),
-      kickoff,
+      kickoff: fromMinutes(mins),
       status: 'upcoming',
       odds: genOdds(rng),
     });

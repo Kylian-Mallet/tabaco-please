@@ -287,7 +287,7 @@ function genClient(day: number, used: Set<string>, forced: Spec = {}): Client {
   let insists = false;
   let plea: string | undefined;
   let policeWorthy: boolean | undefined;
-  if (chance(dodgy ? 0.5 : 0.12)) {
+  if (chance(dodgy ? 0.28 : 0.05)) {
     insists = true;
     if ((isDrunk || banned) && chance(0.5)) {
       policeWorthy = true;
@@ -333,6 +333,7 @@ function genBettingClient(
   used: Set<string>,
   mode: 'place' | 'settle',
   fraud: boolean,
+  startedBet = false,
 ): Client {
   const matches: MatchInfo[] = matchesForDay(day);
   const upcoming = matches.filter((m) => m.status === 'upcoming');
@@ -360,7 +361,11 @@ function genBettingClient(
 
   if (mode === 'place') {
     let pool = upcoming;
-    if (!fraud && upcoming.length) {
+    if (startedBet) {
+      // Illegal case: a bet on a match that has ALREADY kicked off (a finished
+      // morning match) -> the correct action is to REFUSE.
+      pool = done.length ? done : matches;
+    } else if (!fraud && upcoming.length) {
       // Legal-to-register case: the clock advances ~CLOCK_STEP_MIN per client and
       // the roster is capped at MAX_CLIENTS, so this client could be served as late
       // as `latestServe`. Restrict to matches whose kickoff is still ahead of that
@@ -692,8 +697,12 @@ export function dayRoster(day: number): Client[] {
   // settle), plus an occasional fraudster (leaves without paying / fake ticket).
   if (active.has('betting')) {
     addBet('place', false); // legal bet to register + collect
-    addBet('settle', false); // winning ticket to pay out
-    if (chance(0.5)) addBet(chance(0.5) ? 'place' : 'settle', true); // a scammer
+    addBet('settle', false); // winning ticket -> reimbursed by FDJ (commission)
+    // ~1 day in 3: a client tries to bet on a match that has ALREADY started -> refuse.
+    if (chance(0.35) && roster.length < MAX_CLIENTS) {
+      roster.push(genBettingClient(day, used, 'place', false, true));
+    }
+    if (chance(0.4)) addBet(chance(0.5) ? 'place' : 'settle', true); // a scammer
   }
 
   // Essential teaching cases for each active rule (one to refuse, one to sell).

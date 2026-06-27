@@ -219,10 +219,10 @@ export const TOTAL_DAYS: number = 30;
 export const TODAY: string = '2026-06-27';
 
 /** Weekly rent charged at the weekly reckoning. */
-export const RENT: number = 600;
+export const RENT: number = 160;
 
 /** Fixed supplier order cost charged at the weekly reckoning. */
-export const SUPPLIER_ORDER: number = 250;
+export const SUPPLIER_ORDER: number = 60;
 
 /** Starting cash. */
 export const STARTING_CASH: number = 1000;
