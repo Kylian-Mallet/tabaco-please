@@ -27,7 +27,9 @@
         width: 100vw;
         height: 100vh;
         background: #0c0b0a;
-        object-fit: none;
+        /* No object-fit:none — the backbuffer is sized to device pixels
+           (innerWidth*dpr), so the bitmap must scale to fill the CSS box.
+           object-fit:none showed it at intrinsic size => 2x "zoom" on HiDPI. */
         image-rendering: pixelated;
         image-rendering: crisp-edges;
       }
